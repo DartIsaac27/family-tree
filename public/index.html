@@ -12,6 +12,7 @@
 })();
 </script>
 <link rel="stylesheet" href="style.css" />
+<link rel="stylesheet" href="https://unpkg.com/cropperjs@1/dist/cropper.min.css" />
 </head>
 <body>
   <header class="topbar">
@@ -25,6 +26,8 @@
       <button id="zoomFitBtn" class="btn btn-secondary">Set Semula Paparan</button>
       <button id="adminLoginBtn" class="btn btn-secondary">Log Masuk Admin</button>
       <button id="exportBackupBtn" class="btn btn-secondary hidden">Sandaran</button>
+      <button id="importBackupBtn" class="btn btn-secondary hidden">Muat Naik Sandaran</button>
+      <input type="file" id="importBackupInput" accept="application/json" class="hidden" />
       <button id="adminLogoutBtn" class="btn btn-secondary hidden">Log Keluar</button>
       <button id="addPersonBtn" class="btn btn-primary">+ Tambah Orang</button>
     </div>
@@ -64,7 +67,10 @@
               <option value="male">Lelaki</option>
             </select>
           </label>
-          <label>Gambar<input type="file" id="photoFile" accept="image/*" /></label>
+          <label>Gambar
+            <input type="file" id="photoFile" accept="image/*" />
+            <img id="photoPreview" class="photo-preview hidden" alt="Pratonton gambar" />
+          </label>
         </div>
         <div class="form-row">
           <label>Tarikh lahir<input type="text" id="birthDate" placeholder="cth. 1950 atau 1950-04-12" /></label>
@@ -109,7 +115,23 @@
     </div>
   </div>
 
+  <!-- Laraskan/potong gambar -->
+  <div id="cropModal" class="modal-overlay hidden">
+    <div class="modal modal-small">
+      <h2>Laraskan Gambar</h2>
+      <div class="crop-container">
+        <img id="cropImage" alt="" />
+      </div>
+      <p class="crop-hint">Seret untuk gerakkan, gulung/cubit untuk zum.</p>
+      <div class="modal-actions">
+        <button type="button" id="cropCancelBtn" class="btn btn-secondary">Batal</button>
+        <button type="button" id="cropConfirmBtn" class="btn btn-primary">Gunakan Gambar</button>
+      </div>
+    </div>
+  </div>
+
   <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://unpkg.com/cropperjs@1/dist/cropper.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

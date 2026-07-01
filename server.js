@@ -28,7 +28,7 @@ const upload = multer({
   },
 });
 
-app.use(express.json());
+app.use(express.json({ limit: '25mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(uploadsDir));
 
@@ -166,12 +166,23 @@ app.post('/api/photos', upload.single('photo'), (req, res) => {
 app.get('/api/backup/export', requireAdmin, (req, res) => {
   const people = db.prepare('SELECT * FROM people ORDER BY id').all().map(personRow);
   const spousePairs = getAllSpousePairs();
+
+  const photos = {};
+  people.forEach((p) => {
+    if (p.photoPath && !photos[p.photoPath]) {
+      const filePath = path.join(uploadsDir, path.basename(p.photoPath));
+      if (fs.existsSync(filePath)) {
+        photos[p.photoPath] = fs.readFileSync(filePath).toString('base64');
+      }
+    }
+  });
+
   res.setHeader('Content-Disposition', 'attachment; filename="family-tree-backup.json"');
-  res.json({ exportedAt: new Date().toISOString(), people, spousePairs });
+  res.json({ exportedAt: new Date().toISOString(), people, spousePairs, photos });
 });
 
 app.post('/api/backup/import', requireAdmin, (req, res) => {
-  const { people, spousePairs } = req.body || {};
+  const { people, spousePairs, photos } = req.body || {};
   if (!Array.isArray(people) || !Array.isArray(spousePairs)) {
     return res.status(400).json({ error: 'Fail sandaran mesti mengandungi array "people" dan "spousePairs"' });
   }
@@ -201,6 +212,18 @@ app.post('/api/backup/import', requireAdmin, (req, res) => {
     db.exec('ROLLBACK');
     return res.status(400).json({ error: 'Import gagal: ' + err.message });
   }
+
+  if (photos && typeof photos === 'object') {
+    Object.entries(photos).forEach(([photoPath, base64]) => {
+      try {
+        const filename = path.basename(photoPath);
+        fs.writeFileSync(path.join(uploadsDir, filename), Buffer.from(base64, 'base64'));
+      } catch {
+        // skip malformed photo entries rather than failing the whole restore
+      }
+    });
+  }
+
   res.json({ ok: true, imported: people.length });
 });
 

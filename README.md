@@ -2,8 +2,12 @@
 
 A small self-hosted family tree site: an interactive, pan/zoom tree diagram, search, and
 in-browser add/edit forms. No account system — anyone with the link can view, search, add,
-and edit people (it's meant for a private family link, not the open internet). Downloading a
-full backup of the data is the one action gated behind an admin passcode.
+and edit people (it's meant for a private family link, not the open internet). Downloading or
+restoring a full backup of the data are the two actions gated behind an admin passcode.
+
+Backups are self-contained: uploaded photos are embedded in the backup JSON as base64 (not
+just referenced by path), so restoring a backup on a fresh/wiped deployment brings the photos
+back too, not just the names and relationships.
 
 ## Running it locally
 
@@ -19,10 +23,15 @@ and prints it to the terminal, e.g.:
 Admin passcode (only needed to download backups): aabd0ff7
 ```
 
-That passcode is only needed if you click "Log Masuk Admin" (Admin Login) to download a
-backup — it's saved to `data/admin-passcode.txt` so it stays the same across restarts. You can
-set your own instead by setting the `ADMIN_PASSCODE` environment variable before starting the
-server (the older `EDIT_PASSCODE` name still works too, for compatibility).
+That passcode is only needed if you click "Log Masuk Admin" (Admin Login) to download
+(Sandaran) or restore (Muat Naik Sandaran) a backup — it's saved to `data/admin-passcode.txt`
+so it stays the same across restarts. You can set your own instead by setting the
+`ADMIN_PASSCODE` environment variable before starting the server (the older `EDIT_PASSCODE`
+name still works too, for compatibility).
+
+**Restoring a backup replaces all current data** — the whole point is to recover after a
+redeploy wipes the free-tier disk, so it intentionally overwrites whatever's currently there
+rather than merging.
 
 All data lives in `data/family.db` (a SQLite database file) plus uploaded photos in
 `data/uploads/`. That whole `data/` folder is what you'd back up.
@@ -38,6 +47,9 @@ All data lives in `data/family.db` (a SQLite database file) plus uploaded photos
   (pan/zoom, search-to-focus, click-for-detail panel, add/edit modal). It also supports
   light/dark mode, a mobile-responsive layout, and uses the History API so the Android/mobile
   back button closes an open panel or modal instead of leaving the page.
+- **Photo upload:** picking a photo opens a crop/zoom step (via [Cropper.js](https://github.com/fengyuanchen/cropperjs),
+  loaded from a CDN) so every profile photo gets resized down to a consistent 400×400 square
+  before upload, keeping file sizes small and avatars consistently framed.
 
 ## Deploying it online
 

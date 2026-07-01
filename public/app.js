@@ -32,7 +32,7 @@
     nodesById: new Map(),
   };
 
-  const formState = { editingId: null, existingPhotoPath: null, pendingSpouseOf: null, pendingParentOf: null };
+  const formState = { editingId: null, existingPhotoPath: null, pendingSpouseOf: null, pendingParentOf: null, pendingPhotoBlob: null };
 
   // ---- DOM refs ----
   const svg = d3.select('#treeSvg');
@@ -62,6 +62,15 @@
   const adminLoginBtn = document.getElementById('adminLoginBtn');
   const adminLogoutBtn = document.getElementById('adminLogoutBtn');
   const exportBackupBtn = document.getElementById('exportBackupBtn');
+  const importBackupBtn = document.getElementById('importBackupBtn');
+  const importBackupInput = document.getElementById('importBackupInput');
+
+  const photoFileInput = document.getElementById('photoFile');
+  const photoPreview = document.getElementById('photoPreview');
+  const cropModal = document.getElementById('cropModal');
+  const cropImage = document.getElementById('cropImage');
+  const cropCancelBtn = document.getElementById('cropCancelBtn');
+  const cropConfirmBtn = document.getElementById('cropConfirmBtn');
 
   const zoomBehavior = d3.zoom().scaleExtent([0.2, 2.5]).on('zoom', (event) => {
     viewport.attr('transform', event.transform);
@@ -84,6 +93,7 @@
     if (name === 'detailPanel') { detailPanel.classList.add('hidden'); currentDetailId = null; }
     else if (name === 'personModal') { personModal.classList.add('hidden'); }
     else if (name === 'passcodeModal') { passcodeModal.classList.add('hidden'); }
+    else if (name === 'cropModal') { cropModal.classList.add('hidden'); }
   }
 
   function closeOverlay(name, fromPopstate) {
@@ -122,6 +132,7 @@
   function updateAdminUI() {
     adminLoginBtn.classList.toggle('hidden', isAdminLoggedIn);
     exportBackupBtn.classList.toggle('hidden', !isAdminLoggedIn);
+    importBackupBtn.classList.toggle('hidden', !isAdminLoggedIn);
     adminLogoutBtn.classList.toggle('hidden', !isAdminLoggedIn);
   }
 
@@ -233,14 +244,64 @@
     return res.status === 204 ? null : res.json();
   }
 
-  async function uploadPhoto(file) {
+  async function uploadPhoto(fileOrBlob, filename) {
     const fd = new FormData();
-    fd.append('photo', file);
+    fd.append('photo', fileOrBlob, filename || fileOrBlob.name || 'photo.jpg');
     const res = await fetch('/api/photos', { method: 'POST', body: fd });
     if (!res.ok) throw new Error('Muat naik gambar gagal');
     const data = await res.json();
     return data.photoPath;
   }
+
+  // ---- photo crop/resize ----
+
+  let cropperInstance = null;
+  let cropObjectUrl = null;
+
+  function destroyCropper() {
+    if (cropperInstance) { cropperInstance.destroy(); cropperInstance = null; }
+    if (cropObjectUrl) { URL.revokeObjectURL(cropObjectUrl); cropObjectUrl = null; }
+    cropImage.removeAttribute('src');
+  }
+
+  photoFileInput.addEventListener('change', () => {
+    const file = photoFileInput.files[0];
+    if (!file) return;
+    cropObjectUrl = URL.createObjectURL(file);
+    cropImage.src = cropObjectUrl;
+    cropModal.classList.remove('hidden');
+    openOverlay('cropModal');
+    overlayCloseHandlers.cropModal = () => destroyCropper();
+    cropperInstance = new Cropper(cropImage, {
+      aspectRatio: 1,
+      viewMode: 1,
+      dragMode: 'move',
+      background: false,
+      autoCropArea: 1,
+      cropBoxResizable: false,
+      cropBoxMovable: false,
+      guides: false,
+      center: false,
+      highlight: false,
+    });
+  });
+
+  cropCancelBtn.addEventListener('click', () => {
+    photoFileInput.value = '';
+    closeOverlay('cropModal', false);
+  });
+
+  cropConfirmBtn.addEventListener('click', () => {
+    if (!cropperInstance) return;
+    cropperInstance.getCroppedCanvas({ width: 400, height: 400, imageSmoothingQuality: 'high' }).toBlob((blob) => {
+      formState.pendingPhotoBlob = blob;
+      const previewUrl = URL.createObjectURL(blob);
+      photoPreview.src = previewUrl;
+      photoPreview.classList.remove('hidden');
+      photoFileInput.value = '';
+      closeOverlay('cropModal', false);
+    }, 'image/jpeg', 0.9);
+  });
 
   // ---- data loading ----
 
@@ -671,6 +732,9 @@
     formState.existingPhotoPath = null;
     formState.pendingSpouseOf = pendingSpouseOf || null;
     formState.pendingParentOf = pendingParentOf || null;
+    formState.pendingPhotoBlob = null;
+    photoPreview.classList.add('hidden');
+    photoPreview.removeAttribute('src');
 
     populateParentSelects(mode === 'edit' ? personId : null);
 
@@ -686,6 +750,10 @@
       fatherSelect.value = p.fatherId || '';
       motherSelect.value = p.motherId || '';
       formState.existingPhotoPath = p.photoPath || null;
+      if (p.photoPath) {
+        photoPreview.src = p.photoPath;
+        photoPreview.classList.remove('hidden');
+      }
       deletePersonBtn.classList.remove('hidden');
       spouseSection.classList.remove('hidden');
       renderSpouseSection(personId);
@@ -722,11 +790,10 @@
 
   personForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const fileInput = document.getElementById('photoFile');
     let photoPath = formState.existingPhotoPath;
     try {
-      if (fileInput.files && fileInput.files[0]) {
-        photoPath = await uploadPhoto(fileInput.files[0]);
+      if (formState.pendingPhotoBlob) {
+        photoPath = await uploadPhoto(formState.pendingPhotoBlob, 'avatar.jpg');
       }
       const payload = {
         firstName: document.getElementById('firstName').value.trim(),
@@ -817,6 +884,33 @@
       URL.revokeObjectURL(url);
     } catch (err) {
       if (err.message !== 'cancelled') alert(err.message || 'Sandaran gagal');
+    }
+  });
+
+  importBackupBtn.addEventListener('click', () => importBackupInput.click());
+
+  importBackupInput.addEventListener('change', async () => {
+    const file = importBackupInput.files[0];
+    importBackupInput.value = '';
+    if (!file) return;
+    if (!confirm('Ini akan MENGGANTIKAN semua data semasa dengan kandungan fail sandaran ini. Teruskan?')) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const res = await adminFetch('/api/backup/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || 'Pemulihan gagal');
+      }
+      await loadData();
+      fitView();
+      alert('Data sandaran berjaya dipulihkan.');
+    } catch (err) {
+      if (err.message !== 'cancelled') alert(err.message || 'Pemulihan gagal. Pastikan fail itu adalah fail sandaran yang sah.');
     }
   });
 
