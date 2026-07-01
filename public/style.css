@@ -85,7 +85,7 @@ body {
   padding: 8px 12px;
   border: 1px solid var(--color-border);
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 16px;
   background: var(--color-card);
   color: var(--color-ink);
 }
@@ -257,7 +257,7 @@ body {
 label.full { margin-bottom: 12px; }
 input, select, textarea {
   font-family: inherit;
-  font-size: 14px;
+  font-size: 16px;
   padding: 7px 9px;
   border: 1px solid var(--color-border);
   border-radius: 6px;
@@ -295,10 +295,11 @@ input, select, textarea {
   .topbar-actions {
     order: 2;
     margin-left: 0;
-    flex: 0 0 auto;
+    flex: 1 1 100%;
+    width: 100%;
   }
   .btn {
-    padding: 8px 10px;
+    padding: 10px 12px;
     font-size: 13px;
   }
 

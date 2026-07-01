@@ -2,10 +2,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-const passcodeFile = path.join(__dirname, 'data', 'edit-passcode.txt');
+const passcodeFile = path.join(__dirname, 'data', 'admin-passcode.txt');
 
 function loadOrCreatePasscode() {
-  if (process.env.EDIT_PASSCODE) return process.env.EDIT_PASSCODE;
+  const envValue = process.env.ADMIN_PASSCODE || process.env.EDIT_PASSCODE;
+  if (envValue) return envValue;
 
   fs.mkdirSync(path.dirname(passcodeFile), { recursive: true });
   if (fs.existsSync(passcodeFile)) {
@@ -27,12 +28,12 @@ function timingSafeEqual(a, b) {
   return crypto.timingSafeEqual(bufA, bufB);
 }
 
-function requirePasscode(req, res, next) {
-  const provided = req.get('x-edit-passcode') || '';
+function requireAdmin(req, res, next) {
+  const provided = req.get('x-admin-passcode') || '';
   if (!timingSafeEqual(provided, PASSCODE)) {
-    return res.status(401).json({ error: 'Kod laluan edit tidak sah atau tiada.' });
+    return res.status(401).json({ error: 'Kod laluan admin tidak sah atau tiada.' });
   }
   next();
 }
 
-module.exports = { PASSCODE, requirePasscode, timingSafeEqual };
+module.exports = { PASSCODE, requireAdmin, timingSafeEqual };

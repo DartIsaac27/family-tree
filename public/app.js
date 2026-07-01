@@ -59,28 +59,101 @@
   const passcodeError = document.getElementById('passcodeError');
   const passcodeSubmitBtn = document.getElementById('passcodeSubmitBtn');
   const passcodeCancelBtn = document.getElementById('passcodeCancelBtn');
+  const adminLoginBtn = document.getElementById('adminLoginBtn');
+  const adminLogoutBtn = document.getElementById('adminLogoutBtn');
+  const exportBackupBtn = document.getElementById('exportBackupBtn');
 
   const zoomBehavior = d3.zoom().scaleExtent([0.2, 2.5]).on('zoom', (event) => {
     viewport.attr('transform', event.transform);
   });
   svg.call(zoomBehavior);
 
-  // ---- passcode-protected API helpers ----
+  // ---- overlay stack (so the Android/mobile back button closes panels/modals instead of the page) ----
 
-  function getPasscode() { return localStorage.getItem('familyTreeEditPasscode') || ''; }
-  function setPasscode(pc) { localStorage.setItem('familyTreeEditPasscode', pc); }
+  const openOverlays = new Set();
+  const overlayCloseHandlers = {};
+  let suppressPopstate = false;
 
-  function promptForPasscode() {
+  function openOverlay(name) {
+    if (openOverlays.has(name)) return;
+    openOverlays.add(name);
+    history.pushState({ fteOverlay: name }, '');
+  }
+
+  function hideOverlayDom(name) {
+    if (name === 'detailPanel') { detailPanel.classList.add('hidden'); currentDetailId = null; }
+    else if (name === 'personModal') { personModal.classList.add('hidden'); }
+    else if (name === 'passcodeModal') { passcodeModal.classList.add('hidden'); }
+  }
+
+  function closeOverlay(name, fromPopstate) {
+    if (!openOverlays.has(name)) return;
+    openOverlays.delete(name);
+    hideOverlayDom(name);
+    const handler = overlayCloseHandlers[name];
+    if (handler) {
+      delete overlayCloseHandlers[name];
+      handler();
+    }
+    if (!fromPopstate) {
+      suppressPopstate = true;
+      history.back();
+    }
+  }
+
+  window.addEventListener('popstate', () => {
+    if (suppressPopstate) { suppressPopstate = false; return; }
+    const openList = [...openOverlays];
+    const last = openList[openList.length - 1];
+    if (last) closeOverlay(last, true);
+  });
+
+  function closeDetailPanel() { closeOverlay('detailPanel', false); }
+  function closePersonModal() { closeOverlay('personModal', false); }
+
+  // ---- admin login (only gates downloading a backup) ----
+
+  function getAdminPasscode() { return localStorage.getItem('familyTreeAdminPasscode') || ''; }
+  function setAdminPasscode(pc) { localStorage.setItem('familyTreeAdminPasscode', pc); }
+  function clearAdminPasscode() { localStorage.removeItem('familyTreeAdminPasscode'); }
+
+  let isAdminLoggedIn = false;
+
+  function updateAdminUI() {
+    adminLoginBtn.classList.toggle('hidden', isAdminLoggedIn);
+    exportBackupBtn.classList.toggle('hidden', !isAdminLoggedIn);
+    adminLogoutBtn.classList.toggle('hidden', !isAdminLoggedIn);
+  }
+
+  async function verifyStoredAdminPasscode() {
+    const code = getAdminPasscode();
+    if (!code) { isAdminLoggedIn = false; updateAdminUI(); return; }
+    try {
+      const res = await fetch('/api/auth/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ passcode: code }),
+      });
+      const data = await res.json();
+      isAdminLoggedIn = Boolean(data.ok);
+    } catch {
+      isAdminLoggedIn = false;
+    }
+    if (!isAdminLoggedIn) clearAdminPasscode();
+    updateAdminUI();
+  }
+
+  function openAdminLoginModal() {
     return new Promise((resolve, reject) => {
-      passcodeModal.classList.remove('hidden');
       passcodeError.classList.add('hidden');
       passcodeInput.value = '';
+      passcodeModal.classList.remove('hidden');
+      openOverlay('passcodeModal');
       passcodeInput.focus();
 
-      function cleanup() {
-        passcodeModal.classList.add('hidden');
+      function cleanupListeners() {
         passcodeSubmitBtn.removeEventListener('click', submit);
-        passcodeCancelBtn.removeEventListener('click', cancel);
+        passcodeCancelBtn.removeEventListener('click', cancelBtn);
         passcodeInput.removeEventListener('keydown', onKeydown);
       }
       async function submit() {
@@ -92,52 +165,79 @@
         });
         const data = await res.json();
         if (data.ok) {
-          setPasscode(code);
-          cleanup();
+          setAdminPasscode(code);
+          delete overlayCloseHandlers.passcodeModal;
+          cleanupListeners();
+          closeOverlay('passcodeModal', false);
           resolve();
         } else {
           passcodeError.classList.remove('hidden');
         }
       }
-      function cancel() { cleanup(); reject(new Error('cancelled')); }
+      function cancelBtn() { closeOverlay('passcodeModal', false); }
       function onKeydown(e) { if (e.key === 'Enter') submit(); }
 
+      overlayCloseHandlers.passcodeModal = () => {
+        cleanupListeners();
+        reject(new Error('cancelled'));
+      };
+
       passcodeSubmitBtn.addEventListener('click', submit);
-      passcodeCancelBtn.addEventListener('click', cancel);
+      passcodeCancelBtn.addEventListener('click', cancelBtn);
       passcodeInput.addEventListener('keydown', onKeydown);
     });
   }
 
+  adminLoginBtn.addEventListener('click', async () => {
+    try {
+      await openAdminLoginModal();
+      isAdminLoggedIn = true;
+      updateAdminUI();
+    } catch {
+      // login cancelled - stay logged out
+    }
+  });
+
+  adminLogoutBtn.addEventListener('click', () => {
+    clearAdminPasscode();
+    isAdminLoggedIn = false;
+    updateAdminUI();
+  });
+
+  async function adminFetch(url, options = {}) {
+    const res = await fetch(url, {
+      ...options,
+      headers: { ...(options.headers || {}), 'x-admin-passcode': getAdminPasscode() },
+    });
+    if (res.status === 401) {
+      isAdminLoggedIn = false;
+      clearAdminPasscode();
+      updateAdminUI();
+      throw new Error('Sesi admin tamat. Sila log masuk semula.');
+    }
+    return res;
+  }
+
+  // ---- API helpers (public - adding/editing people is open to the whole family) ----
+
   async function apiWrite(url, method, body) {
-    const doFetch = () => fetch(url, {
+    const res = await fetch(url, {
       method,
-      headers: { 'Content-Type': 'application/json', 'x-edit-passcode': getPasscode() },
+      headers: { 'Content-Type': 'application/json' },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
-    let res = await doFetch();
-    if (res.status === 401) {
-      await promptForPasscode();
-      res = await doFetch();
-    }
     if (!res.ok && res.status !== 204) {
       const errBody = await res.json().catch(() => ({}));
-      throw new Error(errBody.error || `Request failed (${res.status})`);
+      throw new Error(errBody.error || `Permintaan gagal (${res.status})`);
     }
     return res.status === 204 ? null : res.json();
   }
 
   async function uploadPhoto(file) {
-    const doFetch = () => {
-      const fd = new FormData();
-      fd.append('photo', file);
-      return fetch('/api/photos', { method: 'POST', headers: { 'x-edit-passcode': getPasscode() }, body: fd });
-    };
-    let res = await doFetch();
-    if (res.status === 401) {
-      await promptForPasscode();
-      res = await doFetch();
-    }
-    if (!res.ok) throw new Error('Photo upload failed');
+    const fd = new FormData();
+    fd.append('photo', file);
+    const res = await fetch('/api/photos', { method: 'POST', body: fd });
+    if (!res.ok) throw new Error('Muat naik gambar gagal');
     const data = await res.json();
     return data.photoPath;
   }
@@ -464,6 +564,7 @@
 
     detailContent.innerHTML = html;
     detailPanel.classList.remove('hidden');
+    openOverlay('detailPanel');
 
     detailContent.querySelectorAll('[data-goto]').forEach((el) => {
       el.addEventListener('click', () => {
@@ -506,8 +607,7 @@
     const p = state.peopleById.get(id);
     if (!confirm(`Padam ${p.firstName} ${p.lastName}? Tindakan ini tidak boleh dibuat asal.`)) return;
     await apiWrite(`/api/people/${id}`, 'DELETE');
-    detailPanel.classList.add('hidden');
-    if (currentDetailId === id) currentDetailId = null;
+    if (currentDetailId === id) closeDetailPanel();
     await loadData();
     fitView();
   }
@@ -601,20 +701,14 @@
     }
 
     personModal.classList.remove('hidden');
-  }
-
-  function closePersonModal() {
-    personModal.classList.add('hidden');
+    openOverlay('personModal');
   }
 
   document.getElementById('addPersonBtn').addEventListener('click', () => openPersonModal({ mode: 'create' }));
   document.getElementById('addFirstPersonBtn').addEventListener('click', () => openPersonModal({ mode: 'create' }));
   document.getElementById('personModalCloseBtn').addEventListener('click', closePersonModal);
   document.getElementById('cancelPersonBtn').addEventListener('click', closePersonModal);
-  document.getElementById('detailCloseBtn').addEventListener('click', () => {
-    detailPanel.classList.add('hidden');
-    currentDetailId = null;
-  });
+  document.getElementById('detailCloseBtn').addEventListener('click', closeDetailPanel);
   document.getElementById('deletePersonBtn').addEventListener('click', () => {
     if (formState.editingId) { closePersonModal(); deletePerson(formState.editingId); }
   });
@@ -708,15 +802,10 @@
 
   document.getElementById('zoomFitBtn').addEventListener('click', fitView);
 
-  document.getElementById('exportBackupBtn').addEventListener('click', async () => {
-    const doFetch = () => fetch('/api/backup/export', { headers: { 'x-edit-passcode': getPasscode() } });
+  exportBackupBtn.addEventListener('click', async () => {
     try {
-      let res = await doFetch();
-      if (res.status === 401) {
-        await promptForPasscode();
-        res = await doFetch();
-      }
-      if (!res.ok) throw new Error('Export failed');
+      const res = await adminFetch('/api/backup/export');
+      if (!res.ok) throw new Error('Sandaran gagal');
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -754,4 +843,5 @@
 
   // ---- init ----
   loadData().then(fitView);
+  verifyStoredAdminPasscode();
 })();

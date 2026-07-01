@@ -5,7 +5,7 @@ const express = require('express');
 const multer = require('multer');
 
 const db = require('./db');
-const { PASSCODE, requirePasscode, timingSafeEqual } = require('./auth');
+const { PASSCODE, requireAdmin, timingSafeEqual } = require('./auth');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -62,18 +62,14 @@ app.get('/api/people', (req, res) => {
   res.json({ people, spousePairs });
 });
 
-app.get('/api/config', (req, res) => {
-  res.json({ hasCustomPasscode: Boolean(process.env.EDIT_PASSCODE) });
-});
-
 app.post('/api/auth/verify', (req, res) => {
   const { passcode } = req.body || {};
   res.json({ ok: timingSafeEqual(passcode || '', PASSCODE) });
 });
 
-// ---- write endpoints (require passcode) ----
+// ---- write endpoints (open to anyone - family-only site) ----
 
-app.post('/api/people', requirePasscode, (req, res) => {
+app.post('/api/people', (req, res) => {
   const b = req.body || {};
   if (!b.firstName || !String(b.firstName).trim()) {
     return res.status(400).json({ error: 'Nama pertama diperlukan' });
@@ -97,7 +93,7 @@ app.post('/api/people', requirePasscode, (req, res) => {
   res.status(201).json(personRow(row));
 });
 
-app.put('/api/people/:id', requirePasscode, (req, res) => {
+app.put('/api/people/:id', (req, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT * FROM people WHERE id = ?').get(id);
   if (!existing) return res.status(404).json({ error: 'Orang tidak dijumpai' });
@@ -130,7 +126,7 @@ app.put('/api/people/:id', requirePasscode, (req, res) => {
   res.json(personRow(row));
 });
 
-app.delete('/api/people/:id', requirePasscode, (req, res) => {
+app.delete('/api/people/:id', (req, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT * FROM people WHERE id = ?').get(id);
   if (!existing) return res.status(404).json({ error: 'Orang tidak dijumpai' });
@@ -139,7 +135,7 @@ app.delete('/api/people/:id', requirePasscode, (req, res) => {
   res.status(204).end();
 });
 
-app.post('/api/spouses', requirePasscode, (req, res) => {
+app.post('/api/spouses', (req, res) => {
   const { personId, spouseId } = req.body || {};
   const a = Number(personId);
   const c = Number(spouseId);
@@ -151,7 +147,7 @@ app.post('/api/spouses', requirePasscode, (req, res) => {
   res.status(201).json({ personId: lo, spouseId: hi });
 });
 
-app.delete('/api/spouses', requirePasscode, (req, res) => {
+app.delete('/api/spouses', (req, res) => {
   const { personId, spouseId } = req.body || {};
   const a = Number(personId);
   const c = Number(spouseId);
@@ -160,21 +156,21 @@ app.delete('/api/spouses', requirePasscode, (req, res) => {
   res.status(204).end();
 });
 
-app.post('/api/photos', requirePasscode, upload.single('photo'), (req, res) => {
+app.post('/api/photos', upload.single('photo'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Tiada imej sah dimuat naik' });
   res.status(201).json({ photoPath: `/uploads/${req.file.filename}` });
 });
 
-// ---- backup / restore (protected) ----
+// ---- backup / restore (admin-only) ----
 
-app.get('/api/backup/export', requirePasscode, (req, res) => {
+app.get('/api/backup/export', requireAdmin, (req, res) => {
   const people = db.prepare('SELECT * FROM people ORDER BY id').all().map(personRow);
   const spousePairs = getAllSpousePairs();
   res.setHeader('Content-Disposition', 'attachment; filename="family-tree-backup.json"');
   res.json({ exportedAt: new Date().toISOString(), people, spousePairs });
 });
 
-app.post('/api/backup/import', requirePasscode, (req, res) => {
+app.post('/api/backup/import', requireAdmin, (req, res) => {
   const { people, spousePairs } = req.body || {};
   if (!Array.isArray(people) || !Array.isArray(spousePairs)) {
     return res.status(400).json({ error: 'Fail sandaran mesti mengandungi array "people" dan "spousePairs"' });
@@ -210,7 +206,7 @@ app.post('/api/backup/import', requirePasscode, (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Family tree site running at http://localhost:${PORT}`);
-  if (!process.env.EDIT_PASSCODE) {
-    console.log(`Edit passcode (share with family, keep away from strangers): ${PASSCODE}`);
+  if (!process.env.ADMIN_PASSCODE && !process.env.EDIT_PASSCODE) {
+    console.log(`Admin passcode (only needed to download backups): ${PASSCODE}`);
   }
 });

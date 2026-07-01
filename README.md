@@ -1,9 +1,9 @@
 # Family Tree
 
 A small self-hosted family tree site: an interactive, pan/zoom tree diagram, search, and
-in-browser add/edit forms. No account system — anyone with the link can view and search;
-adding, editing, or deleting people requires a shared "edit passcode" so the page can't be
-casually vandalized.
+in-browser add/edit forms. No account system — anyone with the link can view, search, add,
+and edit people (it's meant for a private family link, not the open internet). Downloading a
+full backup of the data is the one action gated behind an admin passcode.
 
 ## Running it locally
 
@@ -12,16 +12,17 @@ npm install
 npm start
 ```
 
-Then open http://localhost:3000. On first run the server generates a random edit passcode
+Then open http://localhost:3000. On first run the server generates a random admin passcode
 and prints it to the terminal, e.g.:
 
 ```
-Edit passcode (share with family, keep away from strangers): 7b8641ef
+Admin passcode (only needed to download backups): aabd0ff7
 ```
 
-Share that passcode with family members who should be able to add/edit people. It's saved to
-`data/edit-passcode.txt` so it stays the same across restarts. You can set your own instead by
-setting the `EDIT_PASSCODE` environment variable before starting the server.
+That passcode is only needed if you click "Log Masuk Admin" (Admin Login) to download a
+backup — it's saved to `data/admin-passcode.txt` so it stays the same across restarts. You can
+set your own instead by setting the `ADMIN_PASSCODE` environment variable before starting the
+server (the older `EDIT_PASSCODE` name still works too, for compatibility).
 
 All data lives in `data/family.db` (a SQLite database file) plus uploaded photos in
 `data/uploads/`. That whole `data/` folder is what you'd back up.
@@ -29,11 +30,14 @@ All data lives in `data/family.db` (a SQLite database file) plus uploaded photos
 ## How it works
 
 - **Backend:** `server.js` — a small Express API (`/api/people`, `/api/spouses`, `/api/photos`)
-  backed by Node's built-in SQLite (`db.js`). Write endpoints require the `x-edit-passcode`
-  header (see `auth.js`).
+  backed by Node's built-in SQLite (`db.js`). Only `/api/backup/export` and
+  `/api/backup/import` require the admin passcode (`x-admin-passcode` header, see `auth.js`) —
+  everything else is open so any family member can add/edit without a login.
 - **Frontend:** plain HTML/CSS/JS in `public/` — no build step. `app.js` computes a
   generation-based layout from parent/child and spouse relationships and renders it with D3
-  (pan/zoom, search-to-focus, click-for-detail panel, add/edit modal).
+  (pan/zoom, search-to-focus, click-for-detail panel, add/edit modal). It also supports
+  light/dark mode, a mobile-responsive layout, and uses the History API so the Android/mobile
+  back button closes an open panel or modal instead of leaving the page.
 
 ## Deploying it online
 
@@ -51,7 +55,7 @@ Reasonable options:
 
 I'd recommend Render's Starter plan — it's the cheapest option that reliably won't lose your
 family's data, and deployment is just: push this folder to a GitHub repo, connect it on
-Render, add a 1GB disk, set the `EDIT_PASSCODE` environment variable to a passcode you choose,
+Render, add a 1GB disk, set the `ADMIN_PASSCODE` environment variable to a passcode you choose,
 and deploy.
 
 Let me know if you'd like help setting up the GitHub repo and walking through the Render (or
