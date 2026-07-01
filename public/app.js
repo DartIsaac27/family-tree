@@ -439,22 +439,22 @@
     let html = '';
     html += p.photoPath
       ? `<img class="detail-photo" src="${escapeHtml(p.photoPath)}" alt="" />`
-      : `<div class="detail-photo" style="display:flex;align-items:center;justify-content:center;background:#eee;font-size:28px;color:#999;">${initials(p)}</div>`;
+      : `<div class="detail-photo detail-photo-placeholder">${initials(p)}</div>`;
     html += `<h2 class="detail-name">${escapeHtml(p.firstName + ' ' + p.lastName)}</h2>`;
     html += `<p class="detail-years">${escapeHtml(years(p))}</p>`;
     if (p.bio) html += `<p>${escapeHtml(p.bio)}</p>`;
 
-    html += `<div class="detail-section"><h4>Bapa</h4>${father ? relLink(father) : '<span style="color:#aaa">Tidak diketahui</span> <button type="button" class="btn btn-secondary" data-add-parent="father" style="margin-top:4px;">+ Tambah bapa</button>'}</div>`;
-    html += `<div class="detail-section"><h4>Ibu</h4>${mother ? relLink(mother) : '<span style="color:#aaa">Tidak diketahui</span> <button type="button" class="btn btn-secondary" data-add-parent="mother" style="margin-top:4px;">+ Tambah ibu</button>'}</div>`;
+    html += `<div class="detail-section"><h4>Bapa</h4>${father ? relLink(father) : '<span class="muted-text">Tidak diketahui</span> <button type="button" class="btn btn-secondary" data-add-parent="father" style="margin-top:4px;">+ Tambah bapa</button>'}</div>`;
+    html += `<div class="detail-section"><h4>Ibu</h4>${mother ? relLink(mother) : '<span class="muted-text">Tidak diketahui</span> <button type="button" class="btn btn-secondary" data-add-parent="mother" style="margin-top:4px;">+ Tambah ibu</button>'}</div>`;
 
     html += `<div class="detail-section"><h4>Pasangan</h4>`;
     html += spouseIds.length
       ? spouseIds.map((sid) => state.peopleById.get(sid)).filter(Boolean).map(relLink).join('')
-      : '<span style="color:#aaa">Tiada</span>';
+      : '<span class="muted-text">Tiada</span>';
     html += `<div><button type="button" class="btn btn-secondary" data-add-spouse style="margin-top:6px;">+ Tambah pasangan</button></div></div>`;
 
     html += `<div class="detail-section"><h4>Anak-anak</h4>`;
-    html += children.length ? children.map(relLink).join('') : '<span style="color:#aaa">Tiada</span>';
+    html += children.length ? children.map(relLink).join('') : '<span class="muted-text">Tiada</span>';
     html += `<div><button type="button" class="btn btn-secondary" data-add-child style="margin-top:6px;">+ Tambah anak</button></div></div>`;
 
     html += `<div class="detail-actions">
@@ -729,6 +729,27 @@
     } catch (err) {
       if (err.message !== 'cancelled') alert(err.message || 'Sandaran gagal');
     }
+  });
+
+  // ---- theme (dark / light) ----
+
+  const themeToggleBtn = document.getElementById('themeToggleBtn');
+
+  function updateThemeToggleIcon(theme) {
+    themeToggleBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
+  }
+
+  function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('familyTreeTheme', theme);
+    updateThemeToggleIcon(theme);
+  }
+
+  updateThemeToggleIcon(document.documentElement.getAttribute('data-theme') || 'light');
+
+  themeToggleBtn.addEventListener('click', () => {
+    const current = document.documentElement.getAttribute('data-theme') || 'light';
+    applyTheme(current === 'dark' ? 'light' : 'dark');
   });
 
   // ---- init ----

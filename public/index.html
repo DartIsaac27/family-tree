@@ -2,8 +2,15 @@
 <html lang="ms">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
 <title>Salasilah Keluarga Kami</title>
+<script>
+(function () {
+  var stored = localStorage.getItem('familyTreeTheme');
+  var theme = stored || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  document.documentElement.setAttribute('data-theme', theme);
+})();
+</script>
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -14,6 +21,7 @@
       <div id="searchResults" class="search-results hidden"></div>
     </div>
     <div class="topbar-actions">
+      <button id="themeToggleBtn" class="btn btn-secondary btn-icon" aria-label="Tukar tema gelap/terang" title="Tukar tema gelap/terang">🌙</button>
       <button id="zoomFitBtn" class="btn btn-secondary">Set Semula Paparan</button>
       <button id="exportBackupBtn" class="btn btn-secondary">Sandaran</button>
       <button id="addPersonBtn" class="btn btn-primary">+ Tambah Orang</button>
