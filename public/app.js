@@ -1,8 +1,29 @@
 (function () {
   'use strict';
 
-  const NODE_W = 140, NODE_H = 64, H_GAP = 40, V_GAP = 130;
+  const NODE_W = 170, NODE_H = 64, H_GAP = 40, V_GAP = 130;
   const SPACING = NODE_W + H_GAP;
+  const TEXT_X = 66;
+  const TEXT_RIGHT_PAD = 10;
+  const NAME_MAX_WIDTH = NODE_W - TEXT_X - TEXT_RIGHT_PAD;
+
+  let measureCanvasCtx = null;
+  function measureTextWidth(text, font) {
+    if (!measureCanvasCtx) measureCanvasCtx = document.createElement('canvas').getContext('2d');
+    measureCanvasCtx.font = font;
+    return measureCanvasCtx.measureText(text).width;
+  }
+
+  function truncateToWidth(text, maxWidth, font) {
+    if (measureTextWidth(text, font) <= maxWidth) return text;
+    let lo = 0, hi = text.length;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      const candidate = text.slice(0, mid).trimEnd() + '…';
+      if (measureTextWidth(candidate, font) <= maxWidth) lo = mid; else hi = mid - 1;
+    }
+    return text.slice(0, lo).trimEnd() + '…';
+  }
 
   const state = {
     people: [],
@@ -336,8 +357,9 @@
         g.append('image').attr('class', 'avatar-img').attr('x', 12).attr('y', 12)
           .attr('width', 40).attr('height', 40).attr('clip-path', (d) => `url(#clip-${d.id})`);
         g.append('text').attr('class', 'avatar-initials').attr('x', 32).attr('y', 33);
-        g.append('text').attr('class', 'name-text').attr('x', 66).attr('y', 27);
-        g.append('text').attr('class', 'years-text').attr('x', 66).attr('y', 44);
+        g.append('text').attr('class', 'name-text').attr('x', TEXT_X).attr('y', 27);
+        g.append('text').attr('class', 'years-text').attr('x', TEXT_X).attr('y', 44);
+        g.append('title');
         g.on('click', (event, d) => showDetail(d.id));
         return g;
       });
@@ -352,9 +374,11 @@
     nodeSel.select('text.avatar-initials')
       .text((d) => (d.person.photoPath ? '' : initials(d.person)));
     nodeSel.select('text.name-text')
-      .text((d) => `${d.person.firstName} ${d.person.lastName}`.trim());
+      .text((d) => truncateToWidth(`${d.person.firstName} ${d.person.lastName}`.trim(), NAME_MAX_WIDTH, '600 13px "Segoe UI", system-ui, sans-serif'));
     nodeSel.select('text.years-text')
-      .text((d) => years(d.person));
+      .text((d) => truncateToWidth(years(d.person), NAME_MAX_WIDTH, '11px "Segoe UI", system-ui, sans-serif'));
+    nodeSel.select('title')
+      .text((d) => `${d.person.firstName} ${d.person.lastName}`.trim());
   }
 
   function contentBounds() {
