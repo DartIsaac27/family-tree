@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Our Family Tree</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>Our Family Tree</h1>
+    <div class="search-wrap">
+      <input id="searchInput" type="text" placeholder="Search for a person..." autocomplete="off" />
+      <div id="searchResults" class="search-results hidden"></div>
+    </div>
+    <div class="topbar-actions">
+      <button id="zoomFitBtn" class="btn btn-secondary">Reset view</button>
+      <button id="exportBackupBtn" class="btn btn-secondary">Backup</button>
+      <button id="addPersonBtn" class="btn btn-primary">+ Add Person</button>
+    </div>
+  </header>
+
+  <main id="treeContainer">
+    <svg id="treeSvg"></svg>
+    <div id="emptyState" class="empty-state hidden">
+      <h2>Your tree is empty</h2>
+      <p>Add the first person to get started.</p>
+      <button id="addFirstPersonBtn" class="btn btn-primary">+ Add Person</button>
+    </div>
+  </main>
+
+  <!-- Person detail popover -->
+  <aside id="detailPanel" class="panel hidden">
+    <button class="panel-close" id="detailCloseBtn">&times;</button>
+    <div id="detailContent"></div>
+  </aside>
+
+  <!-- Add / Edit person modal -->
+  <div id="personModal" class="modal-overlay hidden">
+    <div class="modal">
+      <button class="panel-close" id="personModalCloseBtn">&times;</button>
+      <h2 id="personModalTitle">Add Person</h2>
+      <form id="personForm">
+        <input type="hidden" id="personId" />
+        <div class="form-row">
+          <label>First name *<input type="text" id="firstName" required /></label>
+          <label>Last name<input type="text" id="lastName" /></label>
+        </div>
+        <div class="form-row">
+          <label>Gender
+            <select id="gender">
+              <option value="unknown">Unspecified</option>
+              <option value="female">Female</option>
+              <option value="male">Male</option>
+            </select>
+          </label>
+          <label>Photo<input type="file" id="photoFile" accept="image/*" /></label>
+        </div>
+        <div class="form-row">
+          <label>Born<input type="text" id="birthDate" placeholder="e.g. 1950 or 1950-04-12" /></label>
+          <label>Died<input type="text" id="deathDate" placeholder="leave blank if living" /></label>
+        </div>
+        <div class="form-row">
+          <label>Father<select id="fatherId"><option value="">— None —</option></select></label>
+          <label>Mother<select id="motherId"><option value="">— None —</option></select></label>
+        </div>
+        <label class="full">Biography / notes<textarea id="bio" rows="3"></textarea></label>
+
+        <div id="spouseSection" class="hidden">
+          <h3>Spouses</h3>
+          <ul id="spouseList"></ul>
+          <div class="form-row">
+            <select id="addSpouseSelect"><option value="">— Select person —</option></select>
+            <button type="button" id="addSpouseBtn" class="btn btn-secondary">Add spouse</button>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" id="deletePersonBtn" class="btn btn-danger hidden">Delete person</button>
+          <div class="spacer"></div>
+          <button type="button" id="cancelPersonBtn" class="btn btn-secondary">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Passcode prompt -->
+  <div id="passcodeModal" class="modal-overlay hidden">
+    <div class="modal modal-small">
+      <h2>Edit passcode required</h2>
+      <p>Ask whoever set up this site for the family edit passcode.</p>
+      <input type="password" id="passcodeInput" placeholder="Passcode" />
+      <p id="passcodeError" class="error-text hidden">Incorrect passcode.</p>
+      <div class="modal-actions">
+        <button type="button" id="passcodeCancelBtn" class="btn btn-secondary">Cancel</button>
+        <button type="button" id="passcodeSubmitBtn" class="btn btn-primary">Unlock editing</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
