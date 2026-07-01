@@ -295,7 +295,7 @@
   function years(p) {
     const b = p.birthDate ? String(p.birthDate).slice(0, 4) : '?';
     if (p.deathDate) return `${b} – ${String(p.deathDate).slice(0, 4)}`;
-    if (p.birthDate) return `b. ${b}`;
+    if (p.birthDate) return `l. ${b}`;
     return '';
   }
 
@@ -420,22 +420,22 @@
     html += `<p class="detail-years">${escapeHtml(years(p))}</p>`;
     if (p.bio) html += `<p>${escapeHtml(p.bio)}</p>`;
 
-    html += `<div class="detail-section"><h4>Father</h4>${father ? relLink(father) : '<span style="color:#aaa">Unknown</span> <button type="button" class="btn btn-secondary" data-add-parent="father" style="margin-top:4px;">+ Add father</button>'}</div>`;
-    html += `<div class="detail-section"><h4>Mother</h4>${mother ? relLink(mother) : '<span style="color:#aaa">Unknown</span> <button type="button" class="btn btn-secondary" data-add-parent="mother" style="margin-top:4px;">+ Add mother</button>'}</div>`;
+    html += `<div class="detail-section"><h4>Bapa</h4>${father ? relLink(father) : '<span style="color:#aaa">Tidak diketahui</span> <button type="button" class="btn btn-secondary" data-add-parent="father" style="margin-top:4px;">+ Tambah bapa</button>'}</div>`;
+    html += `<div class="detail-section"><h4>Ibu</h4>${mother ? relLink(mother) : '<span style="color:#aaa">Tidak diketahui</span> <button type="button" class="btn btn-secondary" data-add-parent="mother" style="margin-top:4px;">+ Tambah ibu</button>'}</div>`;
 
-    html += `<div class="detail-section"><h4>Spouse${spouseIds.length === 1 ? '' : 's'}</h4>`;
+    html += `<div class="detail-section"><h4>Pasangan</h4>`;
     html += spouseIds.length
       ? spouseIds.map((sid) => state.peopleById.get(sid)).filter(Boolean).map(relLink).join('')
-      : '<span style="color:#aaa">None</span>';
-    html += `<div><button type="button" class="btn btn-secondary" data-add-spouse style="margin-top:6px;">+ Add spouse</button></div></div>`;
+      : '<span style="color:#aaa">Tiada</span>';
+    html += `<div><button type="button" class="btn btn-secondary" data-add-spouse style="margin-top:6px;">+ Tambah pasangan</button></div></div>`;
 
-    html += `<div class="detail-section"><h4>Children</h4>`;
-    html += children.length ? children.map(relLink).join('') : '<span style="color:#aaa">None</span>';
-    html += `<div><button type="button" class="btn btn-secondary" data-add-child style="margin-top:6px;">+ Add child</button></div></div>`;
+    html += `<div class="detail-section"><h4>Anak-anak</h4>`;
+    html += children.length ? children.map(relLink).join('') : '<span style="color:#aaa">Tiada</span>';
+    html += `<div><button type="button" class="btn btn-secondary" data-add-child style="margin-top:6px;">+ Tambah anak</button></div></div>`;
 
     html += `<div class="detail-actions">
-      <button type="button" class="btn btn-primary" data-edit>Edit</button>
-      <button type="button" class="btn btn-danger" data-delete>Delete</button>
+      <button type="button" class="btn btn-primary" data-edit>Sunting</button>
+      <button type="button" class="btn btn-danger" data-delete>Padam</button>
     </div>`;
 
     detailContent.innerHTML = html;
@@ -480,7 +480,7 @@
 
   async function deletePerson(id) {
     const p = state.peopleById.get(id);
-    if (!confirm(`Delete ${p.firstName} ${p.lastName}? This cannot be undone.`)) return;
+    if (!confirm(`Padam ${p.firstName} ${p.lastName}? Tindakan ini tidak boleh dibuat asal.`)) return;
     await apiWrite(`/api/people/${id}`, 'DELETE');
     detailPanel.classList.add('hidden');
     if (currentDetailId === id) currentDetailId = null;
@@ -496,7 +496,7 @@
       .sort((a, b) => (a.firstName + a.lastName).localeCompare(b.firstName + b.lastName));
     [fatherSelect, motherSelect].forEach((sel) => {
       const current = sel.value;
-      sel.innerHTML = '<option value="">— None —</option>';
+      sel.innerHTML = '<option value="">— Tiada —</option>';
       options.forEach((p) => {
         const opt = document.createElement('option');
         opt.value = p.id;
@@ -518,7 +518,7 @@
       li.innerHTML = `<span>${escapeHtml(sp.firstName + ' ' + sp.lastName)}</span>`;
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.textContent = 'Remove';
+      btn.textContent = 'Buang';
       btn.addEventListener('click', async () => {
         await apiWrite('/api/spouses', 'DELETE', { personId, spouseId: sid });
         state.spousePairs = state.spousePairs.filter((s) => !((s.personId === personId && s.spouseId === sid) || (s.personId === sid && s.spouseId === personId)));
@@ -529,7 +529,7 @@
       spouseList.appendChild(li);
     });
 
-    addSpouseSelect.innerHTML = '<option value="">— Select person —</option>';
+    addSpouseSelect.innerHTML = '<option value="">— Pilih orang —</option>';
     state.people
       .filter((p) => p.id !== personId && !spouseIds.includes(p.id))
       .sort((a, b) => (a.firstName + a.lastName).localeCompare(b.firstName + b.lastName))
@@ -552,7 +552,7 @@
 
     if (mode === 'edit') {
       const p = state.peopleById.get(personId);
-      personModalTitle.textContent = 'Edit Person';
+      personModalTitle.textContent = 'Sunting Orang';
       document.getElementById('firstName').value = p.firstName || '';
       document.getElementById('lastName').value = p.lastName || '';
       document.getElementById('gender').value = p.gender || 'unknown';
@@ -566,7 +566,7 @@
       spouseSection.classList.remove('hidden');
       renderSpouseSection(personId);
     } else {
-      personModalTitle.textContent = 'Add Person';
+      personModalTitle.textContent = 'Tambah Orang';
       deletePersonBtn.classList.add('hidden');
       spouseSection.classList.add('hidden');
       if (preset) {
@@ -647,7 +647,7 @@
       await loadData();
       if (currentDetailId) showDetail(currentDetailId);
     } catch (err) {
-      alert(err.message || 'Something went wrong.');
+      alert(err.message || 'Ralat berlaku.');
     }
   });
 
@@ -703,7 +703,7 @@
       a.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
-      if (err.message !== 'cancelled') alert(err.message || 'Export failed');
+      if (err.message !== 'cancelled') alert(err.message || 'Sandaran gagal');
     }
   });
 

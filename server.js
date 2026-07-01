@@ -76,7 +76,7 @@ app.post('/api/auth/verify', (req, res) => {
 app.post('/api/people', requirePasscode, (req, res) => {
   const b = req.body || {};
   if (!b.firstName || !String(b.firstName).trim()) {
-    return res.status(400).json({ error: 'firstName is required' });
+    return res.status(400).json({ error: 'Nama pertama diperlukan' });
   }
   const stmt = db.prepare(`
     INSERT INTO people (first_name, last_name, gender, birth_date, death_date, bio, photo_path, father_id, mother_id)
@@ -100,14 +100,14 @@ app.post('/api/people', requirePasscode, (req, res) => {
 app.put('/api/people/:id', requirePasscode, (req, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT * FROM people WHERE id = ?').get(id);
-  if (!existing) return res.status(404).json({ error: 'Person not found' });
+  if (!existing) return res.status(404).json({ error: 'Orang tidak dijumpai' });
 
   const b = req.body || {};
   if (!b.firstName || !String(b.firstName).trim()) {
-    return res.status(400).json({ error: 'firstName is required' });
+    return res.status(400).json({ error: 'Nama pertama diperlukan' });
   }
   if ((b.fatherId && Number(b.fatherId) === id) || (b.motherId && Number(b.motherId) === id)) {
-    return res.status(400).json({ error: 'A person cannot be their own parent' });
+    return res.status(400).json({ error: 'Seseorang tidak boleh menjadi ibu bapa kepada dirinya sendiri' });
   }
 
   db.prepare(`
@@ -133,7 +133,7 @@ app.put('/api/people/:id', requirePasscode, (req, res) => {
 app.delete('/api/people/:id', requirePasscode, (req, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT * FROM people WHERE id = ?').get(id);
-  if (!existing) return res.status(404).json({ error: 'Person not found' });
+  if (!existing) return res.status(404).json({ error: 'Orang tidak dijumpai' });
 
   db.prepare('DELETE FROM people WHERE id = ?').run(id);
   res.status(204).end();
@@ -144,7 +144,7 @@ app.post('/api/spouses', requirePasscode, (req, res) => {
   const a = Number(personId);
   const c = Number(spouseId);
   if (!a || !c || a === c) {
-    return res.status(400).json({ error: 'Two distinct valid person ids are required' });
+    return res.status(400).json({ error: 'Diperlukan dua ID orang yang berbeza dan sah' });
   }
   const [lo, hi] = a < c ? [a, c] : [c, a];
   db.prepare('INSERT OR IGNORE INTO spouses (person_id, spouse_id) VALUES (?, ?)').run(lo, hi);
@@ -161,7 +161,7 @@ app.delete('/api/spouses', requirePasscode, (req, res) => {
 });
 
 app.post('/api/photos', requirePasscode, upload.single('photo'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'No valid image uploaded' });
+  if (!req.file) return res.status(400).json({ error: 'Tiada imej sah dimuat naik' });
   res.status(201).json({ photoPath: `/uploads/${req.file.filename}` });
 });
 
@@ -177,7 +177,7 @@ app.get('/api/backup/export', requirePasscode, (req, res) => {
 app.post('/api/backup/import', requirePasscode, (req, res) => {
   const { people, spousePairs } = req.body || {};
   if (!Array.isArray(people) || !Array.isArray(spousePairs)) {
-    return res.status(400).json({ error: 'Backup file must contain "people" and "spousePairs" arrays' });
+    return res.status(400).json({ error: 'Fail sandaran mesti mengandungi array "people" dan "spousePairs"' });
   }
 
   db.exec('BEGIN TRANSACTION');
@@ -203,7 +203,7 @@ app.post('/api/backup/import', requirePasscode, (req, res) => {
     db.exec('COMMIT');
   } catch (err) {
     db.exec('ROLLBACK');
-    return res.status(400).json({ error: 'Import failed: ' + err.message });
+    return res.status(400).json({ error: 'Import gagal: ' + err.message });
   }
   res.json({ ok: true, imported: people.length });
 });

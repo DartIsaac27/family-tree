@@ -30,7 +30,7 @@ function timingSafeEqual(a, b) {
 function requirePasscode(req, res, next) {
   const provided = req.get('x-edit-passcode') || '';
   if (!timingSafeEqual(provided, PASSCODE)) {
-    return res.status(401).json({ error: 'Invalid or missing edit passcode.' });
+    return res.status(401).json({ error: 'Kod laluan edit tidak sah atau tiada.' });
   }
   next();
 }
