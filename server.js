@@ -1,26 +1,20 @@
-const path = require('node:path');
 const fs = require('node:fs');
+const path = require('node:path');
+
+const envFile = path.join(__dirname, '.env');
+if (fs.existsSync(envFile)) process.loadEnvFile(envFile);
 const crypto = require('node:crypto');
 const express = require('express');
 const multer = require('multer');
 
-const db = require('./db');
+const { client, ready } = require('./db');
 const { PASSCODE, requireAdmin, timingSafeEqual } = require('./auth');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const uploadsDir = path.join(__dirname, 'data', 'uploads');
-fs.mkdirSync(uploadsDir, { recursive: true });
-
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: uploadsDir,
-    filename: (req, file, cb) => {
-      const ext = path.extname(file.originalname).toLowerCase();
-      cb(null, `${crypto.randomUUID()}${ext}`);
-    },
-  }),
+  storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowed = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
@@ -30,7 +24,6 @@ const upload = multer({
 
 app.use(express.json({ limit: '25mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/uploads', express.static(uploadsDir));
 
 // ---- helpers ----
 
@@ -49,18 +42,28 @@ function personRow(row) {
   };
 }
 
-function getAllSpousePairs() {
-  return db.prepare('SELECT person_id, spouse_id FROM spouses').all()
-    .map((r) => ({ personId: r.person_id, spouseId: r.spouse_id }));
+async function getAllSpousePairs() {
+  const result = await client.execute('SELECT person_id, spouse_id FROM spouses');
+  return result.rows.map((r) => ({ personId: r.person_id, spouseId: r.spouse_id }));
+}
+
+function asyncRoute(handler) {
+  return (req, res) => {
+    handler(req, res).catch((err) => {
+      console.error(err);
+      res.status(500).json({ error: 'Ralat pelayan dalaman' });
+    });
+  };
 }
 
 // ---- read endpoints (public) ----
 
-app.get('/api/people', (req, res) => {
-  const people = db.prepare('SELECT * FROM people ORDER BY id').all().map(personRow);
-  const spousePairs = getAllSpousePairs();
+app.get('/api/people', asyncRoute(async (req, res) => {
+  const peopleResult = await client.execute('SELECT * FROM people ORDER BY id');
+  const people = peopleResult.rows.map(personRow);
+  const spousePairs = await getAllSpousePairs();
   res.json({ people, spousePairs });
-});
+}));
 
 app.post('/api/auth/verify', (req, res) => {
   const { passcode } = req.body || {};
@@ -69,34 +72,37 @@ app.post('/api/auth/verify', (req, res) => {
 
 // ---- write endpoints (open to anyone - family-only site) ----
 
-app.post('/api/people', (req, res) => {
+app.post('/api/people', asyncRoute(async (req, res) => {
   const b = req.body || {};
   if (!b.firstName || !String(b.firstName).trim()) {
     return res.status(400).json({ error: 'Nama pertama diperlukan' });
   }
-  const stmt = db.prepare(`
-    INSERT INTO people (first_name, last_name, gender, birth_date, death_date, bio, photo_path, father_id, mother_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  const info = stmt.run(
-    String(b.firstName).trim(),
-    b.lastName ? String(b.lastName).trim() : '',
-    b.gender || 'unknown',
-    b.birthDate || null,
-    b.deathDate || null,
-    b.bio || null,
-    b.photoPath || null,
-    b.fatherId || null,
-    b.motherId || null
-  );
-  const row = db.prepare('SELECT * FROM people WHERE id = ?').get(info.lastInsertRowid);
-  res.status(201).json(personRow(row));
-});
+  const result = await client.execute({
+    sql: `INSERT INTO people (first_name, last_name, gender, birth_date, death_date, bio, photo_path, father_id, mother_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      String(b.firstName).trim(),
+      b.lastName ? String(b.lastName).trim() : '',
+      b.gender || 'unknown',
+      b.birthDate || null,
+      b.deathDate || null,
+      b.bio || null,
+      b.photoPath || null,
+      b.fatherId || null,
+      b.motherId || null,
+    ],
+  });
+  const row = await client.execute({
+    sql: 'SELECT * FROM people WHERE id = ?',
+    args: [Number(result.lastInsertRowid)],
+  });
+  res.status(201).json(personRow(row.rows[0]));
+}));
 
-app.put('/api/people/:id', (req, res) => {
+app.put('/api/people/:id', asyncRoute(async (req, res) => {
   const id = Number(req.params.id);
-  const existing = db.prepare('SELECT * FROM people WHERE id = ?').get(id);
-  if (!existing) return res.status(404).json({ error: 'Orang tidak dijumpai' });
+  const existing = await client.execute({ sql: 'SELECT * FROM people WHERE id = ?', args: [id] });
+  if (!existing.rows[0]) return res.status(404).json({ error: 'Orang tidak dijumpai' });
 
   const b = req.body || {};
   if (!b.firstName || !String(b.firstName).trim()) {
@@ -106,36 +112,41 @@ app.put('/api/people/:id', (req, res) => {
     return res.status(400).json({ error: 'Seseorang tidak boleh menjadi ibu bapa kepada dirinya sendiri' });
   }
 
-  db.prepare(`
-    UPDATE people SET first_name = ?, last_name = ?, gender = ?, birth_date = ?, death_date = ?,
-      bio = ?, photo_path = ?, father_id = ?, mother_id = ?
-    WHERE id = ?
-  `).run(
-    String(b.firstName).trim(),
-    b.lastName ? String(b.lastName).trim() : '',
-    b.gender || 'unknown',
-    b.birthDate || null,
-    b.deathDate || null,
-    b.bio || null,
-    b.photoPath || null,
-    b.fatherId || null,
-    b.motherId || null,
-    id
-  );
-  const row = db.prepare('SELECT * FROM people WHERE id = ?').get(id);
-  res.json(personRow(row));
-});
+  await client.execute({
+    sql: `UPDATE people SET first_name = ?, last_name = ?, gender = ?, birth_date = ?, death_date = ?,
+          bio = ?, photo_path = ?, father_id = ?, mother_id = ? WHERE id = ?`,
+    args: [
+      String(b.firstName).trim(),
+      b.lastName ? String(b.lastName).trim() : '',
+      b.gender || 'unknown',
+      b.birthDate || null,
+      b.deathDate || null,
+      b.bio || null,
+      b.photoPath || null,
+      b.fatherId || null,
+      b.motherId || null,
+      id,
+    ],
+  });
+  const row = await client.execute({ sql: 'SELECT * FROM people WHERE id = ?', args: [id] });
+  res.json(personRow(row.rows[0]));
+}));
 
-app.delete('/api/people/:id', (req, res) => {
+app.delete('/api/people/:id', asyncRoute(async (req, res) => {
   const id = Number(req.params.id);
-  const existing = db.prepare('SELECT * FROM people WHERE id = ?').get(id);
-  if (!existing) return res.status(404).json({ error: 'Orang tidak dijumpai' });
+  const existing = await client.execute({ sql: 'SELECT * FROM people WHERE id = ?', args: [id] });
+  if (!existing.rows[0]) return res.status(404).json({ error: 'Orang tidak dijumpai' });
 
-  db.prepare('DELETE FROM people WHERE id = ?').run(id);
+  await client.batch([
+    { sql: 'UPDATE people SET father_id = NULL WHERE father_id = ?', args: [id] },
+    { sql: 'UPDATE people SET mother_id = NULL WHERE mother_id = ?', args: [id] },
+    { sql: 'DELETE FROM spouses WHERE person_id = ? OR spouse_id = ?', args: [id, id] },
+    { sql: 'DELETE FROM people WHERE id = ?', args: [id] },
+  ], 'write');
   res.status(204).end();
-});
+}));
 
-app.post('/api/spouses', (req, res) => {
+app.post('/api/spouses', asyncRoute(async (req, res) => {
   const { personId, spouseId } = req.body || {};
   const a = Number(personId);
   const c = Number(spouseId);
@@ -143,93 +154,119 @@ app.post('/api/spouses', (req, res) => {
     return res.status(400).json({ error: 'Diperlukan dua ID orang yang berbeza dan sah' });
   }
   const [lo, hi] = a < c ? [a, c] : [c, a];
-  db.prepare('INSERT OR IGNORE INTO spouses (person_id, spouse_id) VALUES (?, ?)').run(lo, hi);
+  await client.execute({ sql: 'INSERT OR IGNORE INTO spouses (person_id, spouse_id) VALUES (?, ?)', args: [lo, hi] });
   res.status(201).json({ personId: lo, spouseId: hi });
-});
+}));
 
-app.delete('/api/spouses', (req, res) => {
+app.delete('/api/spouses', asyncRoute(async (req, res) => {
   const { personId, spouseId } = req.body || {};
   const a = Number(personId);
   const c = Number(spouseId);
   const [lo, hi] = a < c ? [a, c] : [c, a];
-  db.prepare('DELETE FROM spouses WHERE person_id = ? AND spouse_id = ?').run(lo, hi);
+  await client.execute({ sql: 'DELETE FROM spouses WHERE person_id = ? AND spouse_id = ?', args: [lo, hi] });
   res.status(204).end();
-});
+}));
 
-app.post('/api/photos', upload.single('photo'), (req, res) => {
+app.post('/api/photos', upload.single('photo'), asyncRoute(async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Tiada imej sah dimuat naik' });
-  res.status(201).json({ photoPath: `/uploads/${req.file.filename}` });
-});
+  const id = crypto.randomUUID();
+  await client.execute({
+    sql: 'INSERT INTO photos (id, content_type, data) VALUES (?, ?, ?)',
+    args: [id, req.file.mimetype || 'image/jpeg', req.file.buffer],
+  });
+  res.status(201).json({ photoPath: `/api/photos/${id}` });
+}));
+
+app.get('/api/photos/:id', asyncRoute(async (req, res) => {
+  const result = await client.execute({ sql: 'SELECT content_type, data FROM photos WHERE id = ?', args: [req.params.id] });
+  const row = result.rows[0];
+  if (!row) return res.status(404).end();
+  res.setHeader('Content-Type', row.content_type);
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  res.send(Buffer.from(row.data));
+}));
 
 // ---- backup / restore (admin-only) ----
 
-app.get('/api/backup/export', requireAdmin, (req, res) => {
-  const people = db.prepare('SELECT * FROM people ORDER BY id').all().map(personRow);
-  const spousePairs = getAllSpousePairs();
+app.get('/api/backup/export', requireAdmin, asyncRoute(async (req, res) => {
+  const peopleResult = await client.execute('SELECT * FROM people ORDER BY id');
+  const people = peopleResult.rows.map(personRow);
+  const spousePairs = await getAllSpousePairs();
 
   const photos = {};
-  people.forEach((p) => {
+  for (const p of people) {
     if (p.photoPath && !photos[p.photoPath]) {
-      const filePath = path.join(uploadsDir, path.basename(p.photoPath));
-      if (fs.existsSync(filePath)) {
-        photos[p.photoPath] = fs.readFileSync(filePath).toString('base64');
+      const photoId = p.photoPath.split('/').pop();
+      const photoResult = await client.execute({ sql: 'SELECT content_type, data FROM photos WHERE id = ?', args: [photoId] });
+      const row = photoResult.rows[0];
+      if (row) {
+        photos[p.photoPath] = { contentType: row.content_type, data: Buffer.from(row.data).toString('base64') };
       }
     }
-  });
+  }
 
   res.setHeader('Content-Disposition', 'attachment; filename="family-tree-backup.json"');
   res.json({ exportedAt: new Date().toISOString(), people, spousePairs, photos });
-});
+}));
 
-app.post('/api/backup/import', requireAdmin, (req, res) => {
+app.post('/api/backup/import', requireAdmin, asyncRoute(async (req, res) => {
   const { people, spousePairs, photos } = req.body || {};
   if (!Array.isArray(people) || !Array.isArray(spousePairs)) {
     return res.status(400).json({ error: 'Fail sandaran mesti mengandungi array "people" dan "spousePairs"' });
   }
 
-  db.exec('BEGIN TRANSACTION');
-  try {
-    db.exec('DELETE FROM spouses');
-    db.exec('DELETE FROM people');
-    const insertPerson = db.prepare(`
-      INSERT INTO people (id, first_name, last_name, gender, birth_date, death_date, bio, photo_path, father_id, mother_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    people.forEach((p) => {
-      insertPerson.run(
+  const statements = [
+    { sql: 'DELETE FROM spouses', args: [] },
+    { sql: 'DELETE FROM people', args: [] },
+    { sql: 'DELETE FROM photos', args: [] },
+  ];
+  people.forEach((p) => {
+    statements.push({
+      sql: `INSERT INTO people (id, first_name, last_name, gender, birth_date, death_date, bio, photo_path, father_id, mother_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
         p.id, p.firstName, p.lastName || '', p.gender || 'unknown',
         p.birthDate || null, p.deathDate || null, p.bio || null, p.photoPath || null,
-        p.fatherId || null, p.motherId || null
-      );
+        p.fatherId || null, p.motherId || null,
+      ],
     });
-    const insertSpouse = db.prepare('INSERT OR IGNORE INTO spouses (person_id, spouse_id) VALUES (?, ?)');
-    spousePairs.forEach(({ personId, spouseId }) => {
-      const [lo, hi] = personId < spouseId ? [personId, spouseId] : [spouseId, personId];
-      insertSpouse.run(lo, hi);
+  });
+  spousePairs.forEach(({ personId, spouseId }) => {
+    const [lo, hi] = personId < spouseId ? [personId, spouseId] : [spouseId, personId];
+    statements.push({ sql: 'INSERT OR IGNORE INTO spouses (person_id, spouse_id) VALUES (?, ?)', args: [lo, hi] });
+  });
+  if (photos && typeof photos === 'object') {
+    Object.entries(photos).forEach(([photoPath, photoData]) => {
+      const id = photoPath.split('/').pop();
+      const contentType = (photoData && photoData.contentType) || 'image/jpeg';
+      const base64 = (photoData && photoData.data) || photoData;
+      if (typeof base64 !== 'string') return;
+      statements.push({
+        sql: 'INSERT INTO photos (id, content_type, data) VALUES (?, ?, ?)',
+        args: [id, contentType, Buffer.from(base64, 'base64')],
+      });
     });
-    db.exec('COMMIT');
+  }
+
+  try {
+    await client.batch(statements, 'write');
   } catch (err) {
-    db.exec('ROLLBACK');
     return res.status(400).json({ error: 'Import gagal: ' + err.message });
   }
+  res.json({ ok: true, imported: people.length });
+}));
 
-  if (photos && typeof photos === 'object') {
-    Object.entries(photos).forEach(([photoPath, base64]) => {
-      try {
-        const filename = path.basename(photoPath);
-        fs.writeFileSync(path.join(uploadsDir, filename), Buffer.from(base64, 'base64'));
-      } catch {
-        // skip malformed photo entries rather than failing the whole restore
+ready
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Family tree site running at http://localhost:${PORT}`);
+      console.log(`Database: ${process.env.TURSO_DATABASE_URL ? 'Turso (remote)' : 'local SQLite file'}`);
+      if (!process.env.ADMIN_PASSCODE && !process.env.EDIT_PASSCODE) {
+        console.log(`Admin passcode (only needed to download/restore backups): ${PASSCODE}`);
       }
     });
-  }
-
-  res.json({ ok: true, imported: people.length });
-});
-
-app.listen(PORT, () => {
-  console.log(`Family tree site running at http://localhost:${PORT}`);
-  if (!process.env.ADMIN_PASSCODE && !process.env.EDIT_PASSCODE) {
-    console.log(`Admin passcode (only needed to download backups): ${PASSCODE}`);
-  }
-});
+  })
+  .catch((err) => {
+    console.error('Failed to initialize the database:', err);
+    process.exit(1);
+  });

@@ -1,15 +1,20 @@
-const path = require('node:path');
 const fs = require('node:fs');
-const { DatabaseSync } = require('node:sqlite');
+const path = require('node:path');
+const { createClient } = require('@libsql/client');
 
 const dataDir = path.join(__dirname, 'data');
 fs.mkdirSync(dataDir, { recursive: true });
 
-const db = new DatabaseSync(path.join(dataDir, 'family.db'));
-db.exec('PRAGMA foreign_keys = ON;');
+// In production, TURSO_DATABASE_URL/TURSO_AUTH_TOKEN point at a hosted Turso
+// database, so data survives redeploys even on hosts with no persistent disk.
+// Locally, with no env vars set, this falls back to a plain SQLite file.
+const url = process.env.TURSO_DATABASE_URL || `file:${path.join(dataDir, 'family.db')}`;
+const authToken = process.env.TURSO_AUTH_TOKEN;
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS people (
+const client = createClient(authToken ? { url, authToken } : { url });
+
+const ready = client.batch([
+  `CREATE TABLE IF NOT EXISTS people (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     first_name TEXT NOT NULL,
     last_name TEXT NOT NULL DEFAULT '',
@@ -18,16 +23,21 @@ db.exec(`
     death_date TEXT,
     bio TEXT,
     photo_path TEXT,
-    father_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
-    mother_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+    father_id INTEGER REFERENCES people(id),
+    mother_id INTEGER REFERENCES people(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS spouses (
-    person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
-    spouse_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+  )`,
+  `CREATE TABLE IF NOT EXISTS spouses (
+    person_id INTEGER NOT NULL REFERENCES people(id),
+    spouse_id INTEGER NOT NULL REFERENCES people(id),
     PRIMARY KEY (person_id, spouse_id)
-  );
-`);
+  )`,
+  `CREATE TABLE IF NOT EXISTS photos (
+    id TEXT PRIMARY KEY,
+    content_type TEXT NOT NULL DEFAULT 'image/jpeg',
+    data BLOB NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+], 'write');
 
-module.exports = db;
+module.exports = { client, ready };
