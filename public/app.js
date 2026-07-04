@@ -1231,15 +1231,51 @@
   let activeStateFilter = null;
   let currentView = 'tree';
 
-  function personLatLng(p) {
-    if (p.lat != null && p.lng != null) return [p.lat, p.lng];
+  function personBaseLatLng(p) {
+    if (p.lat != null && p.lng != null) return { lat: p.lat, lng: p.lng };
     const fallback = p.state && MALAYSIA_STATES_BY_NAME.get(p.state);
     if (!fallback) return null;
-    // Jitter people who only have a state (no geocoded address) so they don't
-    // all stack exactly on top of the state's capital.
-    const seed = p.id * 9301 % 233280;
-    const jitter = () => ((seed % 1000) / 1000 - 0.5) * 0.35;
-    return [fallback.lat + jitter(), fallback.lng + jitter() * 1.3];
+    return { lat: fallback.lat, lng: fallback.lng };
+  }
+
+  // People who land on (nearly) the same point - same address, or same state
+  // fallback - get nudged apart in a small ring so pins don't stack exactly on
+  // top of each other. This runs on the final set of points every render, so
+  // it applies regardless of whether the point came from real geocoding or a
+  // state fallback.
+  function spreadOverlappingPoints(entries) {
+    const GRID_DEG = 0.0015; // ~165m grouping bucket
+    const groups = new Map();
+    entries.forEach((e) => {
+      const key = `${Math.round(e.lat / GRID_DEG)}_${Math.round(e.lng / GRID_DEG)}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(e);
+    });
+    groups.forEach((group) => {
+      if (group.length <= 1) return;
+      const centerLat = group.reduce((sum, e) => sum + e.lat, 0) / group.length;
+      const metersToDegLat = 1 / 111320;
+      const metersToDegLng = 1 / (111320 * Math.cos((centerLat * Math.PI) / 180));
+      const radiusMeters = 60 + group.length * 15; // roughly a 100m-ish spread
+      group.forEach((e, i) => {
+        const angle = (2 * Math.PI * i) / group.length;
+        e.lat += Math.sin(angle) * radiusMeters * metersToDegLat;
+        e.lng += Math.cos(angle) * radiusMeters * metersToDegLng;
+      });
+    });
+    return entries;
+  }
+
+  function personMarkerIcon(p) {
+    const inner = p.photoPath
+      ? `<img src="${escapeHtml(p.photoPath)}" alt="" />`
+      : `<div class="map-avatar-fallback">${escapeHtml(initials(p))}</div>`;
+    return L.divIcon({
+      className: `map-avatar-marker gender-${p.gender || 'unknown'}`,
+      html: `<div class="map-avatar-inner">${inner}</div>`,
+      iconSize: [40, 40],
+      iconAnchor: [20, 20],
+    });
   }
 
   function ensureLeafletMap() {
@@ -1278,24 +1314,22 @@
     renderStateFilterChips();
     markersLayer.clearLayers();
 
-    const canSeePrivate = !!currentUser;
     const people = state.people.filter((p) => !activeStateFilter || p.state === activeStateFilter);
-    const points = [];
-    people.forEach((p) => {
-      const latLng = personLatLng(p);
-      if (!latLng) return;
-      points.push(latLng);
-      const nameLine = p.nickname ? `${p.firstName} ${p.lastName} (${p.nickname})` : `${p.firstName} ${p.lastName}`;
-      let popupHtml = `<p class="map-popup-name">${escapeHtml(nameLine)}</p>`;
-      popupHtml += `<p class="map-popup-line">${escapeHtml(years(p))}</p>`;
-      if (p.state) popupHtml += `<p class="map-popup-line">${escapeHtml(p.state)}</p>`;
-      if (canSeePrivate && p.address) popupHtml += `<p class="map-popup-line">${escapeHtml(p.address)}</p>`;
-      if (canSeePrivate && p.phone) popupHtml += `<p class="map-popup-line">${escapeHtml(p.phone)}</p>`;
-      const marker = L.marker(latLng).bindPopup(popupHtml);
-      marker.on('click', () => showDetail(p.id));
+    const entries = people
+      .map((p) => ({ p, ...personBaseLatLng(p) }))
+      .filter((e) => e.lat != null && e.lng != null);
+    spreadOverlappingPoints(entries);
+
+    entries.forEach(({ p, lat, lng }) => {
+      const marker = L.marker([lat, lng], { icon: personMarkerIcon(p) });
+      marker.on('click', () => {
+        leafletMap.flyTo([lat, lng], Math.max(leafletMap.getZoom(), 14), { duration: 0.6 });
+        showDetail(p.id);
+      });
       markersLayer.addLayer(marker);
     });
 
+    const points = entries.map((e) => [e.lat, e.lng]);
     if (activeStateFilter) {
       const fallback = MALAYSIA_STATES_BY_NAME.get(activeStateFilter);
       if (points.length) leafletMap.fitBounds(points, { padding: [40, 40], maxZoom: 11 });

@@ -112,9 +112,8 @@ async function getAllSpousePairs() {
 
 // Nominatim (OpenStreetMap) - free, no API key. Usage policy: max ~1 req/sec,
 // identify the app via User-Agent. Only called when an address is added/changed.
-async function geocodeAddress(address, state) {
-  const query = [address, state, 'Malaysia'].filter(Boolean).join(', ').trim();
-  if (!query) return { lat: null, lng: null };
+async function geocodeQuery(query) {
+  if (!query) return null;
   try {
     const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=my&q=${encodeURIComponent(query)}`;
     const res = await fetch(url, { headers: { 'User-Agent': 'family-tree-app (private family use)' } });
@@ -124,6 +123,32 @@ async function geocodeAddress(address, state) {
     }
   } catch (err) {
     console.error('Geocoding failed:', err.message);
+  }
+  return null;
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Precise house-number-level addresses often aren't in OpenStreetMap's index
+// for smaller Malaysian residential streets, so a full-address query can come
+// back empty. Rather than silently falling back all the way to the state
+// centre, retry with progressively shorter/more general versions of the same
+// address (e.g. dropping down to just the postcode + town) before giving up.
+async function geocodeAddress(address, state) {
+  const attempts = [];
+  if (address) {
+    attempts.push(address);
+    const parts = address.split(',').map((s) => s.trim()).filter(Boolean);
+    if (parts.length > 2) attempts.push(parts.slice(-2).join(', '));
+    if (parts.length > 1) attempts.push(parts[parts.length - 1]);
+  }
+  if (!attempts.length && !state) return { lat: null, lng: null };
+
+  for (let i = 0; i < attempts.length; i++) {
+    if (i > 0) await sleep(350);
+    const query = [attempts[i], state, 'Malaysia'].filter(Boolean).join(', ');
+    const result = await geocodeQuery(query);
+    if (result) return result;
   }
   return { lat: null, lng: null };
 }
