@@ -1,9 +1,11 @@
 # Family Tree
 
 A small self-hosted family tree site: an interactive, pan/zoom tree diagram, search, and
-in-browser add/edit forms. No account system — anyone with the link can view, search, add,
-and edit people (it's meant for a private family link, not the open internet). Downloading or
-restoring a full backup of the data are the two actions gated behind an admin passcode.
+in-browser add/edit forms. Anyone with the link can view and search without logging in, but
+adding, editing, or deleting people requires signing in with Google — this is what lets an
+admin ban a misbehaving account. Downloading or restoring a full backup of the data are
+separate actions gated behind a shared admin passcode (unrelated to individual Google logins).
+First-time visitors who log in see a short one-time walkthrough of how the site works.
 
 Backups are self-contained: uploaded photos are embedded in the backup JSON as base64 (not
 just referenced by path), so restoring a backup brings the photos back too, not just the names
@@ -33,6 +35,10 @@ environment variable (the older `EDIT_PASSCODE` name still works too, for compat
 **Restoring a backup replaces all current data** — it intentionally overwrites whatever's
 currently there rather than merging, since the point is to recover a full known-good state.
 
+Without `GOOGLE_CLIENT_ID` set, local dev still runs, but nobody can log in or add/edit — see
+"Setting up Google Sign-In" below to enable that. Once you have a Client ID, set it in `.env`
+along with (optionally, for testing the admin ban panel) `ADMIN_EMAILS=you@example.com`.
+
 ## How it works
 
 - **Database:** [Turso](https://turso.tech) — a free hosted, SQLite-compatible database — via
@@ -47,9 +53,17 @@ currently there rather than merging, since the point is to recover a full known-
   [Cropper.js](https://github.com/fengyuanchen/cropperjs), loaded from a CDN) so every photo is
   resized to a consistent 400×400 square before upload, keeping file sizes small.
 - **Backend:** `server.js` — a small Express API (`/api/people`, `/api/spouses`, `/api/photos`).
-  Only `/api/backup/export` and `/api/backup/import` require the admin passcode
-  (`x-admin-passcode` header, see `auth.js`) — everything else is open so any family member can
-  add/edit without a login.
+  Viewing (`GET` routes) is public. Adding/editing/deleting people requires a Google login
+  (session cookie, checked by `requireUser` in `server.js`) — a banned account keeps its login
+  but gets a 403 on any write. `/api/backup/export` and `/api/backup/import` are separately
+  gated behind a shared admin passcode (`x-admin-passcode` header, see `auth.js`) — that's
+  unrelated to individual Google accounts.
+- **Accounts:** Google Sign-In (via Google Identity Services, loaded from a CDN) — the ID token
+  is verified server-side with `google-auth-library`, then a signed session cookie is issued
+  (`auth.js`, no external session store needed). A `users` table (`db.js`) tracks each Google
+  account's status (`active`/`banned`) and whether they've completed the first-time tour.
+  Whoever's email is listed in `ADMIN_EMAILS` gets access to a "Urus Pengguna" panel to ban/unban
+  accounts — this is separate from (and in addition to) the backup passcode above.
 - **Frontend:** plain HTML/CSS/JS in `public/` — no build step. `app.js` computes a
   generation-based layout from parent/child and spouse relationships and renders it with D3
   (pan/zoom, search-to-focus, click-for-detail panel, add/edit modal). It also supports
@@ -64,14 +78,37 @@ plan) — there's no more risk of losing data on redeploy or restart.
 
 To deploy:
 
-1. Set these two environment variables on your host (same values as your local `.env`, which is
+1. Set these environment variables on your host (same values as your local `.env`, which is
    never committed to git):
    - `TURSO_DATABASE_URL`
    - `TURSO_AUTH_TOKEN`
-2. Also set `ADMIN_PASSCODE` to a passcode of your choosing.
+   - `GOOGLE_CLIENT_ID` — see below
+   - `ADMIN_EMAILS` — comma-separated Google account emails allowed to ban/unban users
+2. Also set `ADMIN_PASSCODE` to a passcode of your choosing (for backups; unrelated to Google
+   login).
 3. Build command: `npm install`. Start command: `npm start`.
 
 That's it — no disk, no volume, no paid plan required for data persistence.
+
+### Setting up Google Sign-In
+
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/), create a project (or
+   use an existing one).
+2. Go to **APIs & Services → OAuth consent screen** and set it up (External user type is fine
+   for a family site — you can leave it in "Testing" mode and just add family members' emails
+   as test users, or publish it since it only requests basic profile info).
+3. Go to **APIs & Services → Credentials → Create Credentials → OAuth client ID**, type
+   **Web application**.
+4. Under **Authorized JavaScript origins**, add every URL the site is served from, e.g.
+   `http://localhost:3000` for local dev and your Render URL (e.g.
+   `https://family-tree-mpiv.onrender.com`) for production. No redirect URI is needed — this
+   uses Google's newer Sign-In-with-a-button flow, not a redirect-based OAuth flow.
+5. Copy the **Client ID** it gives you (looks like `xxxx.apps.googleusercontent.com`) — no
+   client secret is needed. Set it as `GOOGLE_CLIENT_ID` in `.env` locally and in your host's
+   environment variables for production.
+
+Until `GOOGLE_CLIENT_ID` is set, the site still works for viewing, but the sign-in button shows
+a "log masuk belum disediakan" (login not yet configured) note instead, and nobody can add/edit.
 
 Let me know if you'd like help setting up hosting or walking through any of this — happy to do
 that next.

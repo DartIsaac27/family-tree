@@ -38,6 +38,16 @@ const ready = client.batch([
     data BLOB NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
+  `CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    picture TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    has_seen_tour INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_login TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
 ], 'write');
 
 module.exports = { client, ready };

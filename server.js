@@ -6,12 +6,18 @@ if (fs.existsSync(envFile)) process.loadEnvFile(envFile);
 const crypto = require('node:crypto');
 const express = require('express');
 const multer = require('multer');
+const cookieParser = require('cookie-parser');
+const { OAuth2Client } = require('google-auth-library');
 
 const { client, ready } = require('./db');
-const { PASSCODE, requireAdmin, timingSafeEqual } = require('./auth');
+const {
+  PASSCODE, requireAdmin, timingSafeEqual,
+  SESSION_COOKIE, SESSION_MAX_AGE_MS, createSessionToken, verifySessionToken, isAdminEmail,
+} = require('./auth');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const googleClient = process.env.GOOGLE_CLIENT_ID ? new OAuth2Client(process.env.GOOGLE_CLIENT_ID) : null;
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -23,9 +29,58 @@ const upload = multer({
 });
 
 app.use(express.json({ limit: '25mb' }));
+app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ---- helpers ----
+
+function userRow(row) {
+  return {
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    picture: row.picture,
+    status: row.status,
+    hasSeenTour: !!row.has_seen_tour,
+    isAdmin: isAdminEmail(row.email),
+  };
+}
+
+async function getSessionUser(req) {
+  const userId = verifySessionToken(req.cookies && req.cookies[SESSION_COOKIE]);
+  if (!userId) return null;
+  const result = await client.execute({ sql: 'SELECT * FROM users WHERE id = ?', args: [userId] });
+  return result.rows[0] || null;
+}
+
+async function attachUser(req, res, next) {
+  try {
+    req.sessionUser = await getSessionUser(req);
+    next();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ralat pelayan dalaman' });
+  }
+}
+
+function requireUser(req, res, next) {
+  if (!req.sessionUser) {
+    return res.status(401).json({ error: 'Sila log masuk dengan Google untuk membuat perubahan.' });
+  }
+  if (req.sessionUser.status === 'banned') {
+    return res.status(403).json({ error: 'Akaun anda telah disekat daripada membuat perubahan.' });
+  }
+  next();
+}
+
+function requireAdminUser(req, res, next) {
+  if (!req.sessionUser || !isAdminEmail(req.sessionUser.email)) {
+    return res.status(403).json({ error: 'Hanya admin boleh melakukan tindakan ini.' });
+  }
+  next();
+}
+
+app.use(attachUser);
 
 function personRow(row) {
   return {
@@ -70,9 +125,91 @@ app.post('/api/auth/verify', (req, res) => {
   res.json({ ok: timingSafeEqual(passcode || '', PASSCODE) });
 });
 
-// ---- write endpoints (open to anyone - family-only site) ----
+// ---- Google login (per-person accounts, gates editing) ----
 
-app.post('/api/people', asyncRoute(async (req, res) => {
+app.get('/api/config', (req, res) => {
+  res.json({ googleClientId: process.env.GOOGLE_CLIENT_ID || null });
+});
+
+app.get('/api/auth/me', (req, res) => {
+  res.json({ user: req.sessionUser ? userRow(req.sessionUser) : null });
+});
+
+app.post('/api/auth/google', asyncRoute(async (req, res) => {
+  if (!googleClient) {
+    return res.status(500).json({ error: 'Log masuk Google belum dikonfigurasikan di pelayan ini.' });
+  }
+  const { credential } = req.body || {};
+  if (!credential) return res.status(400).json({ error: 'Tiada token Google diberikan.' });
+
+  let payload;
+  try {
+    const ticket = await googleClient.verifyIdToken({ idToken: credential, audience: process.env.GOOGLE_CLIENT_ID });
+    payload = ticket.getPayload();
+  } catch (err) {
+    return res.status(401).json({ error: 'Token Google tidak sah.' });
+  }
+
+  const existing = await client.execute({ sql: 'SELECT * FROM users WHERE id = ?', args: [payload.sub] });
+  let row;
+  if (existing.rows[0]) {
+    await client.execute({
+      sql: 'UPDATE users SET email = ?, name = ?, picture = ?, last_login = datetime(\'now\') WHERE id = ?',
+      args: [payload.email, payload.name || '', payload.picture || null, payload.sub],
+    });
+    row = { ...existing.rows[0], email: payload.email, name: payload.name || '', picture: payload.picture || null };
+  } else {
+    await client.execute({
+      sql: 'INSERT INTO users (id, email, name, picture) VALUES (?, ?, ?, ?)',
+      args: [payload.sub, payload.email, payload.name || '', payload.picture || null],
+    });
+    row = { id: payload.sub, email: payload.email, name: payload.name || '', picture: payload.picture || null, status: 'active', has_seen_tour: 0 };
+  }
+
+  if (row.status === 'banned') {
+    return res.status(403).json({ error: 'Akaun ini telah disekat daripada log masuk.' });
+  }
+
+  const token = createSessionToken(payload.sub);
+  res.cookie(SESSION_COOKIE, token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: req.protocol === 'https' || req.get('x-forwarded-proto') === 'https',
+    maxAge: SESSION_MAX_AGE_MS,
+  });
+  res.json({ user: userRow(row) });
+}));
+
+app.post('/api/auth/logout', (req, res) => {
+  res.clearCookie(SESSION_COOKIE);
+  res.json({ ok: true });
+});
+
+app.post('/api/auth/seen-tour', requireUser, asyncRoute(async (req, res) => {
+  await client.execute({ sql: 'UPDATE users SET has_seen_tour = 1 WHERE id = ?', args: [req.sessionUser.id] });
+  res.json({ ok: true });
+}));
+
+// ---- admin user management (ban/unban, matched by Google email in ADMIN_EMAILS) ----
+
+app.get('/api/admin/users', requireAdminUser, asyncRoute(async (req, res) => {
+  const result = await client.execute('SELECT * FROM users ORDER BY created_at DESC');
+  res.json({ users: result.rows.map(userRow) });
+}));
+
+app.post('/api/admin/users/:id/ban', requireAdminUser, asyncRoute(async (req, res) => {
+  await client.execute({ sql: 'UPDATE users SET status = ? WHERE id = ?', args: ['banned', req.params.id] });
+  res.json({ ok: true });
+}));
+
+app.post('/api/admin/users/:id/unban', requireAdminUser, asyncRoute(async (req, res) => {
+  await client.execute({ sql: 'UPDATE users SET status = ? WHERE id = ?', args: ['active', req.params.id] });
+  res.json({ ok: true });
+}));
+
+// ---- write endpoints (require Google login; open viewing stays public) ----
+
+app.post('/api/people', requireUser, asyncRoute(async (req, res) => {
   const b = req.body || {};
   if (!b.firstName || !String(b.firstName).trim()) {
     return res.status(400).json({ error: 'Nama pertama diperlukan' });
@@ -99,7 +236,7 @@ app.post('/api/people', asyncRoute(async (req, res) => {
   res.status(201).json(personRow(row.rows[0]));
 }));
 
-app.put('/api/people/:id', asyncRoute(async (req, res) => {
+app.put('/api/people/:id', requireUser, asyncRoute(async (req, res) => {
   const id = Number(req.params.id);
   const existing = await client.execute({ sql: 'SELECT * FROM people WHERE id = ?', args: [id] });
   if (!existing.rows[0]) return res.status(404).json({ error: 'Orang tidak dijumpai' });
@@ -132,7 +269,7 @@ app.put('/api/people/:id', asyncRoute(async (req, res) => {
   res.json(personRow(row.rows[0]));
 }));
 
-app.delete('/api/people/:id', asyncRoute(async (req, res) => {
+app.delete('/api/people/:id', requireUser, asyncRoute(async (req, res) => {
   const id = Number(req.params.id);
   const existing = await client.execute({ sql: 'SELECT * FROM people WHERE id = ?', args: [id] });
   if (!existing.rows[0]) return res.status(404).json({ error: 'Orang tidak dijumpai' });
@@ -146,7 +283,7 @@ app.delete('/api/people/:id', asyncRoute(async (req, res) => {
   res.status(204).end();
 }));
 
-app.post('/api/spouses', asyncRoute(async (req, res) => {
+app.post('/api/spouses', requireUser, asyncRoute(async (req, res) => {
   const { personId, spouseId } = req.body || {};
   const a = Number(personId);
   const c = Number(spouseId);
@@ -158,7 +295,7 @@ app.post('/api/spouses', asyncRoute(async (req, res) => {
   res.status(201).json({ personId: lo, spouseId: hi });
 }));
 
-app.delete('/api/spouses', asyncRoute(async (req, res) => {
+app.delete('/api/spouses', requireUser, asyncRoute(async (req, res) => {
   const { personId, spouseId } = req.body || {};
   const a = Number(personId);
   const c = Number(spouseId);
@@ -167,7 +304,7 @@ app.delete('/api/spouses', asyncRoute(async (req, res) => {
   res.status(204).end();
 }));
 
-app.post('/api/photos', upload.single('photo'), asyncRoute(async (req, res) => {
+app.post('/api/photos', requireUser, upload.single('photo'), asyncRoute(async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Tiada imej sah dimuat naik' });
   const id = crypto.randomUUID();
   await client.execute({

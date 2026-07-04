@@ -24,12 +24,22 @@
     <div class="topbar-actions">
       <button id="themeToggleBtn" class="btn btn-secondary btn-icon" aria-label="Tukar tema gelap/terang" title="Tukar tema gelap/terang">🌙</button>
       <button id="zoomFitBtn" class="btn btn-secondary">Set Semula Paparan</button>
+      <div id="authArea" class="auth-area">
+        <div id="googleSignInBtn"></div>
+        <p id="googleNotConfiguredNote" class="muted-text auth-note hidden">Log masuk belum disediakan.</p>
+        <div id="userInfo" class="user-info hidden">
+          <img id="userAvatar" class="user-avatar hidden" alt="" />
+          <span id="userName" class="user-name"></span>
+          <button type="button" id="userLogoutBtn" class="btn btn-secondary btn-icon" title="Log keluar">⎋</button>
+        </div>
+      </div>
+      <button id="manageUsersBtn" class="btn btn-secondary hidden">Urus Pengguna</button>
       <button id="adminLoginBtn" class="btn btn-secondary">Log Masuk Admin</button>
       <button id="exportBackupBtn" class="btn btn-secondary hidden">Sandaran</button>
       <button id="importBackupBtn" class="btn btn-secondary hidden">Muat Naik Sandaran</button>
       <input type="file" id="importBackupInput" accept="application/json" class="hidden" />
       <button id="adminLogoutBtn" class="btn btn-secondary hidden">Log Keluar</button>
-      <button id="addPersonBtn" class="btn btn-primary">+ Tambah Orang</button>
+      <button id="addPersonBtn" class="btn btn-primary hidden">+ Tambah Orang</button>
     </div>
   </header>
 
@@ -128,6 +138,31 @@
     </div>
   </div>
 
+  <!-- Urus pengguna (sekat/nyahsekat akaun Google) -->
+  <div id="userAdminModal" class="modal-overlay hidden">
+    <div class="modal modal-small">
+      <h2>Urus Pengguna</h2>
+      <p class="muted-text">Akaun yang disekat tidak boleh menambah, menyunting atau memadam ahli keluarga.</p>
+      <ul id="userAdminList" class="user-admin-list"></ul>
+      <div class="modal-actions">
+        <div class="spacer"></div>
+        <button type="button" id="userAdminCloseBtn" class="btn btn-secondary">Tutup</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Panduan permulaan untuk pengguna pertama kali -->
+  <div id="tourModal" class="modal-overlay hidden">
+    <div class="modal modal-small">
+      <div id="tourStepContent"></div>
+      <div class="modal-actions">
+        <button type="button" id="tourSkipBtn" class="btn btn-secondary">Langkau</button>
+        <div class="spacer"></div>
+        <button type="button" id="tourNextBtn" class="btn btn-primary">Seterusnya</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Log masuk admin -->
   <div id="passcodeModal" class="modal-overlay hidden">
     <div class="modal modal-small">
@@ -159,6 +194,7 @@
 
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <script src="https://unpkg.com/cropperjs@1/dist/cropper.min.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="app.js"></script>
 </body>
 </html>

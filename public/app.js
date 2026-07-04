@@ -78,6 +78,24 @@
   const importBackupBtn = document.getElementById('importBackupBtn');
   const importBackupInput = document.getElementById('importBackupInput');
 
+  const authArea = document.getElementById('authArea');
+  const googleSignInBtnContainer = document.getElementById('googleSignInBtn');
+  const googleNotConfiguredNote = document.getElementById('googleNotConfiguredNote');
+  const userInfoEl = document.getElementById('userInfo');
+  const userAvatarImg = document.getElementById('userAvatar');
+  const userNameSpan = document.getElementById('userName');
+  const userLogoutBtn = document.getElementById('userLogoutBtn');
+  const manageUsersBtn = document.getElementById('manageUsersBtn');
+  const userAdminModal = document.getElementById('userAdminModal');
+  const userAdminList = document.getElementById('userAdminList');
+  const userAdminCloseBtn = document.getElementById('userAdminCloseBtn');
+  const tourModal = document.getElementById('tourModal');
+  const tourStepContent = document.getElementById('tourStepContent');
+  const tourNextBtn = document.getElementById('tourNextBtn');
+  const tourSkipBtn = document.getElementById('tourSkipBtn');
+  const addPersonBtn = document.getElementById('addPersonBtn');
+  const addFirstPersonBtn = document.getElementById('addFirstPersonBtn');
+
   const photoFileInput = document.getElementById('photoFile');
   const photoPreview = document.getElementById('photoPreview');
   const cropModal = document.getElementById('cropModal');
@@ -108,6 +126,8 @@
     else if (name === 'passcodeModal') { passcodeModal.classList.add('hidden'); }
     else if (name === 'cropModal') { cropModal.classList.add('hidden'); }
     else if (name === 'linkPersonModal') { linkPersonModal.classList.add('hidden'); }
+    else if (name === 'userAdminModal') { userAdminModal.classList.add('hidden'); }
+    else if (name === 'tourModal') { tourModal.classList.add('hidden'); }
   }
 
   function closeOverlay(name, fromPopstate) {
@@ -243,7 +263,165 @@
     return res;
   }
 
-  // ---- API helpers (public - adding/editing people is open to the whole family) ----
+  // ---- Google login (per-person accounts; gates add/edit/delete, not viewing) ----
+
+  let currentUser = null;
+
+  function updateAuthUI() {
+    const loggedIn = !!currentUser;
+    userInfoEl.classList.toggle('hidden', !loggedIn);
+    googleSignInBtnContainer.classList.toggle('hidden', loggedIn);
+    if (loggedIn) googleNotConfiguredNote.classList.add('hidden');
+    manageUsersBtn.classList.toggle('hidden', !(loggedIn && currentUser.isAdmin));
+    addPersonBtn.classList.toggle('hidden', !loggedIn);
+    addFirstPersonBtn.classList.toggle('hidden', !loggedIn);
+    if (loggedIn) {
+      userNameSpan.textContent = currentUser.name || currentUser.email;
+      if (currentUser.picture) {
+        userAvatarImg.src = currentUser.picture;
+        userAvatarImg.classList.remove('hidden');
+      } else {
+        userAvatarImg.classList.add('hidden');
+      }
+    }
+    if (currentDetailId) showDetail(currentDetailId);
+  }
+
+  async function refreshCurrentUser() {
+    const res = await fetch('/api/auth/me');
+    const data = await res.json();
+    currentUser = data.user;
+    updateAuthUI();
+    return currentUser;
+  }
+
+  async function handleGoogleCredential(response) {
+    try {
+      const res = await fetch('/api/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential: response.credential }),
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || 'Log masuk gagal.'); return; }
+      currentUser = data.user;
+      updateAuthUI();
+      maybeShowTour();
+    } catch {
+      alert('Log masuk gagal. Sila cuba lagi.');
+    }
+  }
+  window.__familyTreeGoogleCallback = handleGoogleCredential;
+
+  async function initGoogleSignIn() {
+    const res = await fetch('/api/config');
+    const { googleClientId } = await res.json();
+    if (!googleClientId) {
+      googleNotConfiguredNote.classList.remove('hidden');
+      return;
+    }
+    const waitForGoogle = () => new Promise((resolve) => {
+      if (window.google && window.google.accounts) return resolve();
+      const interval = setInterval(() => {
+        if (window.google && window.google.accounts) { clearInterval(interval); resolve(); }
+      }, 100);
+    });
+    await waitForGoogle();
+    window.google.accounts.id.initialize({ client_id: googleClientId, callback: handleGoogleCredential });
+    window.google.accounts.id.renderButton(googleSignInBtnContainer, { theme: 'outline', size: 'medium' });
+  }
+
+  userLogoutBtn.addEventListener('click', async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    currentUser = null;
+    updateAuthUI();
+  });
+
+  function requireLoginPrompt() {
+    alert('Sila log masuk dengan Google (di bahagian atas laman) untuk membuat perubahan.');
+  }
+
+  // ---- first-time user tour ----
+
+  const tourSteps = [
+    { title: 'Selamat datang!', body: 'Ini salasilah keluarga kami. Anda boleh cari, lihat, dan bantu kemas kini pokok keluarga ini.' },
+    { title: 'Meneroka pokok keluarga', body: 'Seret untuk gerakkan pandangan, gulung atau cubit untuk zum. Klik mana-mana kad untuk lihat butiran seseorang.' },
+    { title: 'Mencari seseorang', body: 'Gunakan kotak carian di bahagian atas untuk terus pergi kepada seseorang.' },
+    { title: 'Menambah ahli keluarga', body: 'Guna "+ Tambah Orang" untuk ahli baru, atau butang "+ Tambah pasangan"/"+ Tambah anak" pada panel butiran seseorang — sistem akan cadangkan orang sedia ada dahulu supaya rekod tidak bertindih.' },
+  ];
+  let tourIndex = 0;
+
+  function renderTourStep() {
+    const step = tourSteps[tourIndex];
+    const isLast = tourIndex === tourSteps.length - 1;
+    tourStepContent.innerHTML = `<div class="tour-step"><p class="tour-progress">Langkah ${tourIndex + 1} / ${tourSteps.length}</p><h3>${escapeHtml(step.title)}</h3><p>${escapeHtml(step.body)}</p></div>`;
+    tourNextBtn.textContent = isLast ? 'Selesai' : 'Seterusnya';
+    tourSkipBtn.classList.toggle('hidden', isLast);
+  }
+
+  async function finishTour() {
+    closeOverlay('tourModal', false);
+    try { await fetch('/api/auth/seen-tour', { method: 'POST' }); } catch { /* best-effort */ }
+    if (currentUser) currentUser.hasSeenTour = true;
+  }
+
+  function openTour() {
+    tourIndex = 0;
+    renderTourStep();
+    tourModal.classList.remove('hidden');
+    openOverlay('tourModal');
+    overlayCloseHandlers.tourModal = () => { finishTour(); };
+  }
+
+  function maybeShowTour() {
+    if (currentUser && !currentUser.hasSeenTour) openTour();
+  }
+
+  tourNextBtn.addEventListener('click', () => {
+    if (tourIndex === tourSteps.length - 1) {
+      finishTour();
+    } else {
+      tourIndex += 1;
+      renderTourStep();
+    }
+  });
+  tourSkipBtn.addEventListener('click', finishTour);
+
+  // ---- admin: manage users (ban/unban by Google account) ----
+
+  async function loadUserAdminList() {
+    const res = await fetch('/api/admin/users');
+    if (!res.ok) { alert('Hanya admin boleh mengurus pengguna.'); return; }
+    const data = await res.json();
+    userAdminList.innerHTML = data.users.map((u) => `
+      <li>
+        ${u.picture ? `<img src="${escapeHtml(u.picture)}" alt="" />` : ''}
+        <div class="user-admin-info">
+          <div class="user-admin-name">${escapeHtml(u.name || u.email)}</div>
+          <div class="user-admin-email">${escapeHtml(u.email)}</div>
+          ${u.status === 'banned' ? '<div class="user-admin-status">Disekat</div>' : ''}
+        </div>
+        <button type="button" class="btn btn-secondary" data-user-toggle="${u.id}" data-user-status="${u.status}">${u.status === 'banned' ? 'Nyahsekat' : 'Sekat'}</button>
+      </li>
+    `).join('') || '<p class="muted-text">Tiada pengguna log masuk lagi.</p>';
+    userAdminList.querySelectorAll('[data-user-toggle]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.getAttribute('data-user-toggle');
+        const action = btn.getAttribute('data-user-status') === 'banned' ? 'unban' : 'ban';
+        await fetch(`/api/admin/users/${encodeURIComponent(id)}/${action}`, { method: 'POST' });
+        await loadUserAdminList();
+      });
+    });
+  }
+
+  manageUsersBtn.addEventListener('click', async () => {
+    await loadUserAdminList();
+    userAdminModal.classList.remove('hidden');
+    openOverlay('userAdminModal');
+  });
+  userAdminCloseBtn.addEventListener('click', () => closeOverlay('userAdminModal', false));
+
+  // ---- API helpers (viewing is public; adding/editing requires a Google login) ----
 
   async function apiWrite(url, method, body) {
     const res = await fetch(url, {
@@ -713,6 +891,7 @@
     const children = state.people.filter((c) => c.fatherId === id || c.motherId === id);
 
     const relLink = (person) => `<span class="detail-link" data-goto="${person.id}">${escapeHtml(person.firstName + ' ' + person.lastName)}</span>`;
+    const canEdit = !!currentUser;
 
     let html = '';
     html += p.photoPath
@@ -722,23 +901,29 @@
     html += `<p class="detail-years">${escapeHtml(years(p))}</p>`;
     if (p.bio) html += `<p>${escapeHtml(p.bio)}</p>`;
 
-    html += `<div class="detail-section"><h4>Bapa</h4>${father ? relLink(father) : '<span class="muted-text">Tidak diketahui</span> <button type="button" class="btn btn-secondary" data-add-parent="father" style="margin-top:4px;">+ Tambah bapa</button>'}</div>`;
-    html += `<div class="detail-section"><h4>Ibu</h4>${mother ? relLink(mother) : '<span class="muted-text">Tidak diketahui</span> <button type="button" class="btn btn-secondary" data-add-parent="mother" style="margin-top:4px;">+ Tambah ibu</button>'}</div>`;
+    html += `<div class="detail-section"><h4>Bapa</h4>${father ? relLink(father) : '<span class="muted-text">Tidak diketahui</span>'}${!father && canEdit ? ' <button type="button" class="btn btn-secondary" data-add-parent="father" style="margin-top:4px;">+ Tambah bapa</button>' : ''}</div>`;
+    html += `<div class="detail-section"><h4>Ibu</h4>${mother ? relLink(mother) : '<span class="muted-text">Tidak diketahui</span>'}${!mother && canEdit ? ' <button type="button" class="btn btn-secondary" data-add-parent="mother" style="margin-top:4px;">+ Tambah ibu</button>' : ''}</div>`;
 
     html += `<div class="detail-section"><h4>Pasangan</h4>`;
     html += spouseIds.length
       ? spouseIds.map((sid) => state.peopleById.get(sid)).filter(Boolean).map(relLink).join('')
       : '<span class="muted-text">Tiada</span>';
-    html += `<div><button type="button" class="btn btn-secondary" data-add-spouse style="margin-top:6px;">+ Tambah pasangan</button></div></div>`;
+    if (canEdit) html += `<div><button type="button" class="btn btn-secondary" data-add-spouse style="margin-top:6px;">+ Tambah pasangan</button></div>`;
+    html += `</div>`;
 
     html += `<div class="detail-section"><h4>Anak-anak</h4>`;
     html += children.length ? children.map(relLink).join('') : '<span class="muted-text">Tiada</span>';
-    html += `<div><button type="button" class="btn btn-secondary" data-add-child style="margin-top:6px;">+ Tambah anak</button></div></div>`;
+    if (canEdit) html += `<div><button type="button" class="btn btn-secondary" data-add-child style="margin-top:6px;">+ Tambah anak</button></div>`;
+    html += `</div>`;
 
-    html += `<div class="detail-actions">
-      <button type="button" class="btn btn-primary" data-edit>Sunting</button>
-      <button type="button" class="btn btn-danger" data-delete>Padam</button>
-    </div>`;
+    if (canEdit) {
+      html += `<div class="detail-actions">
+        <button type="button" class="btn btn-primary" data-edit>Sunting</button>
+        <button type="button" class="btn btn-danger" data-delete>Padam</button>
+      </div>`;
+    } else {
+      html += `<p class="muted-text" style="margin-top:16px;">Log masuk dengan Google untuk menyunting.</p>`;
+    }
 
     detailContent.innerHTML = html;
     detailPanel.classList.remove('hidden');
@@ -751,12 +936,12 @@
         focusOnPerson(targetId);
       });
     });
-    detailContent.querySelector('[data-edit]').addEventListener('click', () => openPersonModal({ mode: 'edit', personId: id }));
-    detailContent.querySelector('[data-delete]').addEventListener('click', () => deletePerson(id));
-    detailContent.querySelector('[data-add-child]').addEventListener('click', () => {
+    detailContent.querySelector('[data-edit]')?.addEventListener('click', () => openPersonModal({ mode: 'edit', personId: id }));
+    detailContent.querySelector('[data-delete]')?.addEventListener('click', () => deletePerson(id));
+    detailContent.querySelector('[data-add-child]')?.addEventListener('click', () => {
       openLinkPersonModal('child', id);
     });
-    detailContent.querySelector('[data-add-spouse]').addEventListener('click', () => {
+    detailContent.querySelector('[data-add-spouse]')?.addEventListener('click', () => {
       openLinkPersonModal('spouse', id);
     });
     detailContent.querySelectorAll('[data-add-parent]').forEach((el) => {
@@ -957,8 +1142,14 @@
     openOverlay('personModal');
   }
 
-  document.getElementById('addPersonBtn').addEventListener('click', () => openPersonModal({ mode: 'create' }));
-  document.getElementById('addFirstPersonBtn').addEventListener('click', () => openPersonModal({ mode: 'create' }));
+  addPersonBtn.addEventListener('click', () => {
+    if (!currentUser) return requireLoginPrompt();
+    openPersonModal({ mode: 'create' });
+  });
+  addFirstPersonBtn.addEventListener('click', () => {
+    if (!currentUser) return requireLoginPrompt();
+    openPersonModal({ mode: 'create' });
+  });
   document.getElementById('personModalCloseBtn').addEventListener('click', closePersonModal);
   document.getElementById('cancelPersonBtn').addEventListener('click', closePersonModal);
   document.getElementById('detailCloseBtn').addEventListener('click', closeDetailPanel);
@@ -1123,4 +1314,6 @@
   // ---- init ----
   loadData().then(fitView);
   verifyStoredAdminPasscode();
+  initGoogleSignIn();
+  refreshCurrentUser().then(maybeShowTour);
 })();

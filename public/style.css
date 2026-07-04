@@ -316,6 +316,31 @@ input, select, textarea {
 .auto-match-hint button:hover { background: var(--color-hover); }
 .cropper-view-box, .cropper-face { border-radius: 50%; }
 
+.auth-area { display: flex; align-items: center; }
+.auth-note { margin: 0; font-size: 13px; }
+.user-info { display: flex; align-items: center; gap: 6px; }
+.user-avatar { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; }
+.user-name { font-size: 13px; color: var(--color-ink); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.user-admin-list { list-style: none; margin: 0 0 8px; padding: 0; max-height: 340px; overflow-y: auto; }
+.user-admin-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.user-admin-list li:last-child { border-bottom: none; }
+.user-admin-list img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+.user-admin-info { flex: 1; min-width: 0; }
+.user-admin-name { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-admin-email { font-size: 12px; color: var(--color-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-admin-status { font-size: 11px; text-transform: uppercase; color: var(--color-danger); }
+
+.tour-step h3 { margin-top: 0; }
+.tour-step p { line-height: 1.5; }
+.tour-progress { font-size: 12px; color: var(--color-muted); margin: 0 0 4px; }
+
 /* ---- responsive / mobile ---- */
 
 @media (max-width: 640px) {
