@@ -110,6 +110,24 @@
     </div>
   </div>
 
+  <!-- Sambung ke orang sedia ada (pasangan / anak) -->
+  <div id="linkPersonModal" class="modal-overlay hidden">
+    <div class="modal modal-small">
+      <h2 id="linkPersonTitle">Tambah Pasangan</h2>
+      <p id="linkPersonDesc" class="muted-text"></p>
+      <label class="full">Pilih orang sedia ada
+        <select id="linkPersonSelect"><option value="">— Pilih orang —</option></select>
+      </label>
+      <p id="linkPersonError" class="error-text hidden">Sila pilih seseorang.</p>
+      <div class="modal-actions">
+        <button type="button" id="linkPersonCreateNewBtn" class="btn btn-secondary">+ Orang baru</button>
+        <div class="spacer"></div>
+        <button type="button" id="linkPersonCancelBtn" class="btn btn-secondary">Batal</button>
+        <button type="button" id="linkPersonSubmitBtn" class="btn btn-primary">Sambungkan</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Log masuk admin -->
   <div id="passcodeModal" class="modal-overlay hidden">
     <div class="modal modal-small">

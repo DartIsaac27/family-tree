@@ -58,6 +58,15 @@
   const fatherNameInput = document.getElementById('fatherNameText');
   const fatherMatchHint = document.getElementById('fatherMatchHint');
 
+  const linkPersonModal = document.getElementById('linkPersonModal');
+  const linkPersonTitle = document.getElementById('linkPersonTitle');
+  const linkPersonDesc = document.getElementById('linkPersonDesc');
+  const linkPersonSelect = document.getElementById('linkPersonSelect');
+  const linkPersonError = document.getElementById('linkPersonError');
+  const linkPersonSubmitBtn = document.getElementById('linkPersonSubmitBtn');
+  const linkPersonCreateNewBtn = document.getElementById('linkPersonCreateNewBtn');
+  const linkPersonCancelBtn = document.getElementById('linkPersonCancelBtn');
+
   const passcodeModal = document.getElementById('passcodeModal');
   const passcodeInput = document.getElementById('passcodeInput');
   const passcodeError = document.getElementById('passcodeError');
@@ -98,6 +107,7 @@
     else if (name === 'personModal') { personModal.classList.add('hidden'); }
     else if (name === 'passcodeModal') { passcodeModal.classList.add('hidden'); }
     else if (name === 'cropModal') { cropModal.classList.add('hidden'); }
+    else if (name === 'linkPersonModal') { linkPersonModal.classList.add('hidden'); }
   }
 
   function closeOverlay(name, fromPopstate) {
@@ -585,6 +595,109 @@
 
   // ---- detail panel ----
 
+  // ---- link to an existing person (add spouse / add child without duplicating records) ----
+
+  function openLinkPersonModal(type, personId) {
+    const p = state.peopleById.get(personId);
+    linkPersonError.classList.add('hidden');
+    linkPersonSelect.innerHTML = '<option value="">— Pilih orang —</option>';
+
+    let eligible;
+    if (type === 'spouse') {
+      linkPersonTitle.textContent = 'Tambah Pasangan';
+      linkPersonDesc.textContent = `Pilih pasangan sedia ada untuk ${p.firstName}, atau cipta orang baru jika belum wujud.`;
+      const spouseIds = state.spousePairs
+        .filter((s) => s.personId === personId || s.spouseId === personId)
+        .map((s) => (s.personId === personId ? s.spouseId : s.personId));
+      eligible = state.people.filter((person) => person.id !== personId && !spouseIds.includes(person.id));
+    } else {
+      linkPersonTitle.textContent = 'Tambah Anak';
+      linkPersonDesc.textContent = `Pilih anak sedia ada untuk dikaitkan dengan ${p.firstName}, atau cipta orang baru jika belum wujud.`;
+      const ancestors = new Set();
+      (function collectAncestors(id) {
+        const person = state.peopleById.get(id);
+        if (!person) return;
+        [person.fatherId, person.motherId].forEach((pid) => {
+          if (pid && !ancestors.has(pid)) { ancestors.add(pid); collectAncestors(pid); }
+        });
+      })(personId);
+      eligible = state.people.filter((person) => (
+        person.id !== personId && !ancestors.has(person.id)
+        && person.fatherId !== personId && person.motherId !== personId
+      ));
+    }
+
+    eligible
+      .sort((a, b) => (a.firstName + a.lastName).localeCompare(b.firstName + b.lastName))
+      .forEach((person) => {
+        const opt = document.createElement('option');
+        opt.value = person.id;
+        opt.textContent = `${person.firstName} ${person.lastName}`;
+        linkPersonSelect.appendChild(opt);
+      });
+
+    linkPersonModal.classList.remove('hidden');
+    openOverlay('linkPersonModal');
+
+    function cleanup() {
+      linkPersonSubmitBtn.removeEventListener('click', onSubmit);
+      linkPersonCreateNewBtn.removeEventListener('click', onCreateNew);
+      linkPersonCancelBtn.removeEventListener('click', onCancel);
+    }
+
+    async function onSubmit() {
+      const sid = Number(linkPersonSelect.value);
+      if (!sid) { linkPersonError.classList.remove('hidden'); return; }
+      delete overlayCloseHandlers.linkPersonModal;
+      cleanup();
+      closeOverlay('linkPersonModal', false);
+      try {
+        if (type === 'spouse') {
+          await apiWrite('/api/spouses', 'POST', { personId, spouseId: sid });
+        } else {
+          const child = state.peopleById.get(sid);
+          const role = p.gender === 'female' ? 'motherId' : 'fatherId';
+          const childPayload = {
+            firstName: child.firstName, lastName: child.lastName, gender: child.gender,
+            birthDate: child.birthDate, deathDate: child.deathDate, bio: child.bio, photoPath: child.photoPath,
+            fatherId: child.fatherId, motherId: child.motherId,
+          };
+          childPayload[role] = personId;
+          await apiWrite(`/api/people/${sid}`, 'PUT', childPayload);
+        }
+        await loadData();
+        if (currentDetailId) showDetail(currentDetailId);
+      } catch (err) {
+        alert(err.message || 'Ralat berlaku.');
+      }
+    }
+
+    function onCreateNew() {
+      delete overlayCloseHandlers.linkPersonModal;
+      cleanup();
+      closeOverlay('linkPersonModal', false);
+      if (type === 'spouse') {
+        openPersonModal({ mode: 'create', pendingSpouseOf: personId });
+      } else {
+        const preset = {};
+        if (p.gender === 'male') preset.fatherId = personId;
+        else if (p.gender === 'female') preset.motherId = personId;
+        else preset.fatherId = personId;
+        openPersonModal({ mode: 'create', preset });
+      }
+    }
+
+    function onCancel() {
+      closeOverlay('linkPersonModal', false);
+    }
+
+    overlayCloseHandlers.linkPersonModal = () => { cleanup(); };
+
+    linkPersonSubmitBtn.addEventListener('click', onSubmit);
+    linkPersonCreateNewBtn.addEventListener('click', onCreateNew);
+    linkPersonCancelBtn.addEventListener('click', onCancel);
+  }
+
   function showDetail(id) {
     const p = state.peopleById.get(id);
     if (!p) return;
@@ -641,14 +754,10 @@
     detailContent.querySelector('[data-edit]').addEventListener('click', () => openPersonModal({ mode: 'edit', personId: id }));
     detailContent.querySelector('[data-delete]').addEventListener('click', () => deletePerson(id));
     detailContent.querySelector('[data-add-child]').addEventListener('click', () => {
-      const preset = {};
-      if (p.gender === 'male') preset.fatherId = id;
-      else if (p.gender === 'female') preset.motherId = id;
-      else preset.fatherId = id;
-      openPersonModal({ mode: 'create', preset });
+      openLinkPersonModal('child', id);
     });
     detailContent.querySelector('[data-add-spouse]').addEventListener('click', () => {
-      openPersonModal({ mode: 'create', pendingSpouseOf: id });
+      openLinkPersonModal('spouse', id);
     });
     detailContent.querySelectorAll('[data-add-parent]').forEach((el) => {
       el.addEventListener('click', () => {
