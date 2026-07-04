@@ -13,6 +13,7 @@
 </script>
 <link rel="stylesheet" href="style.css" />
 <link rel="stylesheet" href="https://unpkg.com/cropperjs@1/dist/cropper.min.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 </head>
 <body>
   <header class="topbar">
@@ -20,6 +21,10 @@
     <div class="search-wrap">
       <input id="searchInput" type="text" placeholder="Cari seseorang..." autocomplete="off" />
       <div id="searchResults" class="search-results hidden"></div>
+    </div>
+    <div class="view-toggle">
+      <button id="viewTreeBtn" class="btn btn-secondary view-toggle-btn active" type="button">🌳 Pokok Keluarga</button>
+      <button id="viewMapBtn" class="btn btn-secondary view-toggle-btn" type="button">🗺️ Peta Keluarga</button>
     </div>
     <div class="topbar-actions">
       <button id="themeToggleBtn" class="btn btn-secondary btn-icon" aria-label="Tukar tema gelap/terang" title="Tukar tema gelap/terang">🌙</button>
@@ -45,6 +50,11 @@
       <p>Tambah orang pertama untuk bermula.</p>
       <button id="addFirstPersonBtn" class="btn btn-primary">+ Tambah Orang</button>
     </div>
+  </main>
+
+  <main id="mapContainer" class="hidden">
+    <div id="mapStateFilter" class="map-state-filter"></div>
+    <div id="familyMap"></div>
   </main>
 
   <!-- Panel butiran orang -->
@@ -94,6 +104,22 @@
           <label>Bapa<select id="fatherId"><option value="">— Tiada —</option></select></label>
           <label>Ibu<select id="motherId"><option value="">— Tiada —</option></select></label>
         </div>
+        <div class="form-row">
+          <label>Nama panggilan<input type="text" id="nickname" placeholder="cth. Along" /></label>
+          <label>Negeri
+            <select id="stateSelect">
+              <option value="">— Tiada —</option>
+            </select>
+          </label>
+        </div>
+        <label class="full">
+          Alamat <span class="muted-text">(hanya kelihatan kepada ahli yang log masuk)</span>
+          <textarea id="address" rows="2" placeholder="cth. Ulu Tiram, Johor"></textarea>
+        </label>
+        <label class="full">
+          No. telefon <span class="muted-text">(hanya kelihatan kepada ahli yang log masuk)</span>
+          <input type="text" id="phone" placeholder="cth. 012-3456789" />
+        </label>
         <label class="full">Biografi / catatan<textarea id="bio" rows="3"></textarea></label>
 
         <div id="spouseSection" class="hidden">
@@ -175,6 +201,7 @@
 
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <script src="https://unpkg.com/cropperjs@1/dist/cropper.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="app.js"></script>
 </body>

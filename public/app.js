@@ -7,6 +7,28 @@
   const TEXT_RIGHT_PAD = 10;
   const NAME_MAX_WIDTH = NODE_W - TEXT_X - TEXT_RIGHT_PAD;
 
+  // Fallback centre point (state capital) used to place a person's pin on the
+  // family map when their address couldn't be geocoded, or has none yet.
+  const MALAYSIA_STATES = [
+    { name: 'Johor', lat: 1.4927, lng: 103.7414 },
+    { name: 'Kedah', lat: 6.1184, lng: 100.3685 },
+    { name: 'Kelantan', lat: 6.1254, lng: 102.2381 },
+    { name: 'Melaka', lat: 2.1896, lng: 102.2501 },
+    { name: 'Negeri Sembilan', lat: 2.7297, lng: 101.9381 },
+    { name: 'Pahang', lat: 3.8168, lng: 103.3317 },
+    { name: 'Perak', lat: 4.5975, lng: 101.0901 },
+    { name: 'Perlis', lat: 6.4414, lng: 100.1986 },
+    { name: 'Pulau Pinang', lat: 5.4141, lng: 100.3288 },
+    { name: 'Sabah', lat: 5.9804, lng: 116.0735 },
+    { name: 'Sarawak', lat: 1.5535, lng: 110.3593 },
+    { name: 'Selangor', lat: 3.0733, lng: 101.5185 },
+    { name: 'Terengganu', lat: 5.3117, lng: 103.1324 },
+    { name: 'W.P. Kuala Lumpur', lat: 3.1390, lng: 101.6869 },
+    { name: 'W.P. Labuan', lat: 5.2831, lng: 115.2308 },
+    { name: 'W.P. Putrajaya', lat: 2.9264, lng: 101.6964 },
+  ];
+  const MALAYSIA_STATES_BY_NAME = new Map(MALAYSIA_STATES.map((s) => [s.name, s]));
+
   let measureCanvasCtx = null;
   function measureTextWidth(text, font) {
     if (!measureCanvasCtx) measureCanvasCtx = document.createElement('canvas').getContext('2d');
@@ -57,6 +79,16 @@
   const binBintiSelect = document.getElementById('binBinti');
   const fatherNameInput = document.getElementById('fatherNameText');
   const fatherMatchHint = document.getElementById('fatherMatchHint');
+  const nicknameInput = document.getElementById('nickname');
+  const stateSelect = document.getElementById('stateSelect');
+  const addressInput = document.getElementById('address');
+  const phoneInput = document.getElementById('phone');
+  MALAYSIA_STATES.forEach((s) => {
+    const opt = document.createElement('option');
+    opt.value = s.name;
+    opt.textContent = s.name;
+    stateSelect.appendChild(opt);
+  });
 
   const linkPersonModal = document.getElementById('linkPersonModal');
   const linkPersonTitle = document.getElementById('linkPersonTitle');
@@ -401,6 +433,7 @@
     state.spousePairs = data.spousePairs;
     state.peopleById = new Map(state.people.map((p) => [p.id, p]));
     render();
+    refreshFamilyMapIfActive();
   }
 
   // ---- layout computation ----
@@ -624,7 +657,11 @@
     nodeSel.select('text.avatar-initials')
       .text((d) => (d.person.photoPath ? '' : initials(d.person)));
     nodeSel.select('text.name-text')
-      .text((d) => truncateToWidth(`${d.person.firstName} ${d.person.lastName}`.trim(), NAME_MAX_WIDTH, '600 13px "Segoe UI", system-ui, sans-serif'));
+      .text((d) => {
+        const base = `${d.person.firstName} ${d.person.lastName}`.trim();
+        const full = d.person.nickname ? `${base} (${d.person.nickname})` : base;
+        return truncateToWidth(full, NAME_MAX_WIDTH, '600 13px "Segoe UI", system-ui, sans-serif');
+      });
     nodeSel.select('text.years-text')
       .text((d) => truncateToWidth(years(d.person), NAME_MAX_WIDTH, '11px "Segoe UI", system-ui, sans-serif'));
     nodeSel.select('title')
@@ -733,9 +770,10 @@
           const child = state.peopleById.get(sid);
           const role = p.gender === 'female' ? 'motherId' : 'fatherId';
           const childPayload = {
-            firstName: child.firstName, lastName: child.lastName, gender: child.gender,
+            firstName: child.firstName, lastName: child.lastName, nickname: child.nickname, gender: child.gender,
             birthDate: child.birthDate, deathDate: child.deathDate, bio: child.bio, photoPath: child.photoPath,
             fatherId: child.fatherId, motherId: child.motherId,
+            state: child.state, address: child.address, phone: child.phone,
           };
           childPayload[role] = personId;
           await apiWrite(`/api/people/${sid}`, 'PUT', childPayload);
@@ -794,9 +832,16 @@
     html += p.photoPath
       ? `<img class="detail-photo" src="${escapeHtml(p.photoPath)}" alt="" />`
       : `<div class="detail-photo detail-photo-placeholder">${initials(p)}</div>`;
-    html += `<h2 class="detail-name">${escapeHtml(p.firstName + ' ' + p.lastName)}</h2>`;
+    const nameWithNickname = p.nickname ? `${p.firstName} ${p.lastName} (${p.nickname})` : `${p.firstName} ${p.lastName}`;
+    html += `<h2 class="detail-name">${escapeHtml(nameWithNickname)}</h2>`;
     html += `<p class="detail-years">${escapeHtml(years(p))}</p>`;
     if (p.bio) html += `<p>${escapeHtml(p.bio)}</p>`;
+
+    if (p.state) html += `<div class="detail-section"><h4>Negeri</h4>${escapeHtml(p.state)}</div>`;
+    if (canEdit) {
+      html += `<div class="detail-section"><h4>Alamat</h4>${p.address ? escapeHtml(p.address) : '<span class="muted-text">Tiada</span>'}</div>`;
+      html += `<div class="detail-section"><h4>No. telefon</h4>${p.phone ? escapeHtml(p.phone) : '<span class="muted-text">Tiada</span>'}</div>`;
+    }
 
     html += `<div class="detail-section"><h4>Bapa</h4>${father ? relLink(father) : '<span class="muted-text">Tidak diketahui</span>'}${!father && canEdit ? ' <button type="button" class="btn btn-secondary" data-add-parent="father" style="margin-top:4px;">+ Tambah bapa</button>' : ''}</div>`;
     html += `<div class="detail-section"><h4>Ibu</h4>${mother ? relLink(mother) : '<span class="muted-text">Tidak diketahui</span>'}${!mother && canEdit ? ' <button type="button" class="btn btn-secondary" data-add-parent="mother" style="margin-top:4px;">+ Tambah ibu</button>' : ''}</div>`;
@@ -1012,6 +1057,10 @@
       document.getElementById('bio').value = p.bio || '';
       fatherSelect.value = p.fatherId || '';
       motherSelect.value = p.motherId || '';
+      nicknameInput.value = p.nickname || '';
+      stateSelect.value = p.state || '';
+      addressInput.value = p.address || '';
+      phoneInput.value = p.phone || '';
       formState.existingPhotoPath = p.photoPath || null;
       if (p.photoPath) {
         photoPreview.src = p.photoPath;
@@ -1071,6 +1120,7 @@
       const payload = {
         firstName: document.getElementById('firstName').value.trim(),
         lastName: buildLastName(),
+        nickname: nicknameInput.value.trim() || null,
         gender: document.getElementById('gender').value,
         birthDate: document.getElementById('birthDate').value.trim() || null,
         deathDate: document.getElementById('deathDate').value.trim() || null,
@@ -1078,6 +1128,9 @@
         photoPath,
         fatherId: fatherSelect.value ? Number(fatherSelect.value) : null,
         motherId: motherSelect.value ? Number(motherSelect.value) : null,
+        state: stateSelect.value || null,
+        address: addressInput.value.trim() || null,
+        phone: phoneInput.value.trim() || null,
       };
 
       let saved;
@@ -1093,9 +1146,10 @@
       if (formState.pendingParentOf) {
         const child = state.peopleById.get(formState.pendingParentOf.childId);
         const childPayload = {
-          firstName: child.firstName, lastName: child.lastName, gender: child.gender,
+          firstName: child.firstName, lastName: child.lastName, nickname: child.nickname, gender: child.gender,
           birthDate: child.birthDate, deathDate: child.deathDate, bio: child.bio, photoPath: child.photoPath,
           fatherId: child.fatherId, motherId: child.motherId,
+          state: child.state, address: child.address, phone: child.phone,
         };
         childPayload[formState.pendingParentOf.role === 'father' ? 'fatherId' : 'motherId'] = saved.id;
         await apiWrite(`/api/people/${child.id}`, 'PUT', childPayload);
@@ -1163,6 +1217,114 @@
     const current = document.documentElement.getAttribute('data-theme') || 'light';
     applyTheme(current === 'dark' ? 'light' : 'dark');
   });
+
+  // ---- family map (state filter + Leaflet pins) ----
+
+  const viewTreeBtn = document.getElementById('viewTreeBtn');
+  const viewMapBtn = document.getElementById('viewMapBtn');
+  const treeContainerEl = document.getElementById('treeContainer');
+  const mapContainerEl = document.getElementById('mapContainer');
+  const mapStateFilterEl = document.getElementById('mapStateFilter');
+
+  let leafletMap = null;
+  let markersLayer = null;
+  let activeStateFilter = null;
+  let currentView = 'tree';
+
+  function personLatLng(p) {
+    if (p.lat != null && p.lng != null) return [p.lat, p.lng];
+    const fallback = p.state && MALAYSIA_STATES_BY_NAME.get(p.state);
+    if (!fallback) return null;
+    // Jitter people who only have a state (no geocoded address) so they don't
+    // all stack exactly on top of the state's capital.
+    const seed = p.id * 9301 % 233280;
+    const jitter = () => ((seed % 1000) / 1000 - 0.5) * 0.35;
+    return [fallback.lat + jitter(), fallback.lng + jitter() * 1.3];
+  }
+
+  function ensureLeafletMap() {
+    if (leafletMap) return;
+    leafletMap = L.map('familyMap').setView([4.2105, 108.9758], 6);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 18,
+    }).addTo(leafletMap);
+    markersLayer = L.layerGroup().addTo(leafletMap);
+  }
+
+  function renderStateFilterChips() {
+    const counts = new Map();
+    state.people.forEach((p) => {
+      if (!p.state) return;
+      counts.set(p.state, (counts.get(p.state) || 0) + 1);
+    });
+    const totalWithState = [...counts.values()].reduce((a, b) => a + b, 0);
+    let html = `<button type="button" class="state-chip${activeStateFilter ? '' : ' active'}" data-state="">Semua<span class="count">${totalWithState}</span></button>`;
+    html += MALAYSIA_STATES
+      .filter((s) => counts.get(s.name))
+      .map((s) => `<button type="button" class="state-chip${activeStateFilter === s.name ? ' active' : ''}" data-state="${escapeHtml(s.name)}">${escapeHtml(s.name)}<span class="count">${counts.get(s.name)}</span></button>`)
+      .join('');
+    mapStateFilterEl.innerHTML = html;
+    mapStateFilterEl.querySelectorAll('[data-state]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        activeStateFilter = btn.getAttribute('data-state') || null;
+        renderFamilyMap();
+      });
+    });
+  }
+
+  function renderFamilyMap() {
+    ensureLeafletMap();
+    renderStateFilterChips();
+    markersLayer.clearLayers();
+
+    const canSeePrivate = !!currentUser;
+    const people = state.people.filter((p) => !activeStateFilter || p.state === activeStateFilter);
+    const points = [];
+    people.forEach((p) => {
+      const latLng = personLatLng(p);
+      if (!latLng) return;
+      points.push(latLng);
+      const nameLine = p.nickname ? `${p.firstName} ${p.lastName} (${p.nickname})` : `${p.firstName} ${p.lastName}`;
+      let popupHtml = `<p class="map-popup-name">${escapeHtml(nameLine)}</p>`;
+      popupHtml += `<p class="map-popup-line">${escapeHtml(years(p))}</p>`;
+      if (p.state) popupHtml += `<p class="map-popup-line">${escapeHtml(p.state)}</p>`;
+      if (canSeePrivate && p.address) popupHtml += `<p class="map-popup-line">${escapeHtml(p.address)}</p>`;
+      if (canSeePrivate && p.phone) popupHtml += `<p class="map-popup-line">${escapeHtml(p.phone)}</p>`;
+      const marker = L.marker(latLng).bindPopup(popupHtml);
+      marker.on('click', () => showDetail(p.id));
+      markersLayer.addLayer(marker);
+    });
+
+    if (activeStateFilter) {
+      const fallback = MALAYSIA_STATES_BY_NAME.get(activeStateFilter);
+      if (points.length) leafletMap.fitBounds(points, { padding: [40, 40], maxZoom: 11 });
+      else if (fallback) leafletMap.setView([fallback.lat, fallback.lng], 10);
+    } else if (points.length) {
+      leafletMap.fitBounds(points, { padding: [40, 40], maxZoom: 8 });
+    } else {
+      leafletMap.setView([4.2105, 108.9758], 6);
+    }
+  }
+
+  function refreshFamilyMapIfActive() {
+    if (currentView === 'map') renderFamilyMap();
+  }
+
+  function switchView(view) {
+    currentView = view;
+    viewTreeBtn.classList.toggle('active', view === 'tree');
+    viewMapBtn.classList.toggle('active', view === 'map');
+    treeContainerEl.classList.toggle('hidden', view !== 'tree');
+    mapContainerEl.classList.toggle('hidden', view !== 'map');
+    if (view === 'map') {
+      renderFamilyMap();
+      setTimeout(() => leafletMap && leafletMap.invalidateSize(), 50);
+    }
+  }
+
+  viewTreeBtn.addEventListener('click', () => switchView('tree'));
+  viewMapBtn.addEventListener('click', () => switchView('map'));
 
   // ---- init ----
   loadData().then(fitView);

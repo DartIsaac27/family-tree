@@ -13,6 +13,23 @@ const authToken = process.env.TURSO_AUTH_TOKEN;
 
 const client = createClient(authToken ? { url, authToken } : { url });
 
+const PEOPLE_COLUMNS_TO_ADD = [
+  'nickname TEXT',
+  'state TEXT',
+  'address TEXT',
+  'phone TEXT',
+  'lat REAL',
+  'lng REAL',
+];
+
+async function addColumnIfMissing(table, columnDef) {
+  try {
+    await client.execute(`ALTER TABLE ${table} ADD COLUMN ${columnDef}`);
+  } catch (err) {
+    if (!/duplicate column name/i.test(err.message)) throw err;
+  }
+}
+
 const ready = client.batch([
   `CREATE TABLE IF NOT EXISTS people (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,6 +65,10 @@ const ready = client.batch([
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     last_login TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
-], 'write');
+], 'write').then(async () => {
+  for (const columnDef of PEOPLE_COLUMNS_TO_ADD) {
+    await addColumnIfMissing('people', columnDef);
+  }
+});
 
 module.exports = { client, ready };

@@ -81,11 +81,12 @@ function requireAdminUser(req, res, next) {
 
 app.use(attachUser);
 
-function personRow(row) {
-  return {
+function personRow(row, includePrivate) {
+  const person = {
     id: row.id,
     firstName: row.first_name,
     lastName: row.last_name,
+    nickname: row.nickname,
     gender: row.gender,
     birthDate: row.birth_date,
     deathDate: row.death_date,
@@ -93,12 +94,38 @@ function personRow(row) {
     photoPath: row.photo_path,
     fatherId: row.father_id,
     motherId: row.mother_id,
+    state: row.state,
+    lat: row.lat,
+    lng: row.lng,
   };
+  if (includePrivate) {
+    person.address = row.address;
+    person.phone = row.phone;
+  }
+  return person;
 }
 
 async function getAllSpousePairs() {
   const result = await client.execute('SELECT person_id, spouse_id FROM spouses');
   return result.rows.map((r) => ({ personId: r.person_id, spouseId: r.spouse_id }));
+}
+
+// Nominatim (OpenStreetMap) - free, no API key. Usage policy: max ~1 req/sec,
+// identify the app via User-Agent. Only called when an address is added/changed.
+async function geocodeAddress(address, state) {
+  const query = [address, state, 'Malaysia'].filter(Boolean).join(', ').trim();
+  if (!query) return { lat: null, lng: null };
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=my&q=${encodeURIComponent(query)}`;
+    const res = await fetch(url, { headers: { 'User-Agent': 'family-tree-app (private family use)' } });
+    const data = await res.json();
+    if (Array.isArray(data) && data[0]) {
+      return { lat: Number(data[0].lat), lng: Number(data[0].lon) };
+    }
+  } catch (err) {
+    console.error('Geocoding failed:', err.message);
+  }
+  return { lat: null, lng: null };
 }
 
 function asyncRoute(handler) {
@@ -113,8 +140,9 @@ function asyncRoute(handler) {
 // ---- read endpoints (public) ----
 
 app.get('/api/people', asyncRoute(async (req, res) => {
+  const includePrivate = !!req.sessionUser;
   const peopleResult = await client.execute('SELECT * FROM people ORDER BY id');
-  const people = peopleResult.rows.map(personRow);
+  const people = peopleResult.rows.map((row) => personRow(row, includePrivate));
   const spousePairs = await getAllSpousePairs();
   res.json({ people, spousePairs });
 }));
@@ -208,12 +236,16 @@ app.post('/api/people', requireUser, asyncRoute(async (req, res) => {
   if (!b.firstName || !String(b.firstName).trim()) {
     return res.status(400).json({ error: 'Nama pertama diperlukan' });
   }
+  const address = b.address ? String(b.address).trim() : null;
+  const state = b.state || null;
+  const { lat, lng } = await geocodeAddress(address, state);
   const result = await client.execute({
-    sql: `INSERT INTO people (first_name, last_name, gender, birth_date, death_date, bio, photo_path, father_id, mother_id)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    sql: `INSERT INTO people (first_name, last_name, nickname, gender, birth_date, death_date, bio, photo_path, father_id, mother_id, state, address, phone, lat, lng)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     args: [
       String(b.firstName).trim(),
       b.lastName ? String(b.lastName).trim() : '',
+      b.nickname ? String(b.nickname).trim() : null,
       b.gender || 'unknown',
       b.birthDate || null,
       b.deathDate || null,
@@ -221,13 +253,18 @@ app.post('/api/people', requireUser, asyncRoute(async (req, res) => {
       b.photoPath || null,
       b.fatherId || null,
       b.motherId || null,
+      state,
+      address,
+      b.phone ? String(b.phone).trim() : null,
+      lat,
+      lng,
     ],
   });
   const row = await client.execute({
     sql: 'SELECT * FROM people WHERE id = ?',
     args: [Number(result.lastInsertRowid)],
   });
-  res.status(201).json(personRow(row.rows[0]));
+  res.status(201).json(personRow(row.rows[0], true));
 }));
 
 app.put('/api/people/:id', requireUser, asyncRoute(async (req, res) => {
@@ -243,12 +280,22 @@ app.put('/api/people/:id', requireUser, asyncRoute(async (req, res) => {
     return res.status(400).json({ error: 'Seseorang tidak boleh menjadi ibu bapa kepada dirinya sendiri' });
   }
 
+  const address = b.address ? String(b.address).trim() : null;
+  const state = b.state || null;
+  const prev = existing.rows[0];
+  let lat = prev.lat;
+  let lng = prev.lng;
+  if (address !== prev.address || state !== prev.state) {
+    ({ lat, lng } = await geocodeAddress(address, state));
+  }
+
   await client.execute({
-    sql: `UPDATE people SET first_name = ?, last_name = ?, gender = ?, birth_date = ?, death_date = ?,
-          bio = ?, photo_path = ?, father_id = ?, mother_id = ? WHERE id = ?`,
+    sql: `UPDATE people SET first_name = ?, last_name = ?, nickname = ?, gender = ?, birth_date = ?, death_date = ?,
+          bio = ?, photo_path = ?, father_id = ?, mother_id = ?, state = ?, address = ?, phone = ?, lat = ?, lng = ? WHERE id = ?`,
     args: [
       String(b.firstName).trim(),
       b.lastName ? String(b.lastName).trim() : '',
+      b.nickname ? String(b.nickname).trim() : null,
       b.gender || 'unknown',
       b.birthDate || null,
       b.deathDate || null,
@@ -256,11 +303,16 @@ app.put('/api/people/:id', requireUser, asyncRoute(async (req, res) => {
       b.photoPath || null,
       b.fatherId || null,
       b.motherId || null,
+      state,
+      address,
+      b.phone ? String(b.phone).trim() : null,
+      lat,
+      lng,
       id,
     ],
   });
   const row = await client.execute({ sql: 'SELECT * FROM people WHERE id = ?', args: [id] });
-  res.json(personRow(row.rows[0]));
+  res.json(personRow(row.rows[0], true));
 }));
 
 app.delete('/api/people/:id', requireUser, asyncRoute(async (req, res) => {
