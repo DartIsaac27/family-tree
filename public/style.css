@@ -244,7 +244,7 @@ body {
   box-shadow: -8px 0 24px var(--color-shadow);
   padding: 20px;
   overflow-y: auto;
-  z-index: 30;
+  z-index: 900; /* above Leaflet's map panes (up to z-index 700 internally) */
 }
 
 .panel-close {
@@ -292,7 +292,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 50;
+  z-index: 1000; /* above the detail panel (900) and Leaflet's map panes */
 }
 
 .modal {
