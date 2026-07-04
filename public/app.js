@@ -53,6 +53,10 @@
   const spouseList = document.getElementById('spouseList');
   const addSpouseSelect = document.getElementById('addSpouseSelect');
   const deletePersonBtn = document.getElementById('deletePersonBtn');
+  const genderSelect = document.getElementById('gender');
+  const binBintiSelect = document.getElementById('binBinti');
+  const fatherNameInput = document.getElementById('fatherNameText');
+  const fatherMatchHint = document.getElementById('fatherMatchHint');
 
   const passcodeModal = document.getElementById('passcodeModal');
   const passcodeInput = document.getElementById('passcodeInput');
@@ -726,6 +730,69 @@
       });
   }
 
+  // ---- bin/binti naming (name bin/binti father's name) ----
+
+  function parseBinBinti(lastName, gender) {
+    const trimmed = (lastName || '').trim();
+    const match = trimmed.match(/^(bin|binti)\s+(.*)$/i);
+    if (match) {
+      const label = match[1][0].toUpperCase() + match[1].slice(1).toLowerCase();
+      return { binBinti: label, fatherName: match[2].trim() };
+    }
+    return { binBinti: gender === 'female' ? 'Binti' : 'Bin', fatherName: trimmed };
+  }
+
+  function buildLastName() {
+    const fatherName = fatherNameInput.value.trim();
+    return fatherName ? `${binBintiSelect.value} ${fatherName}` : '';
+  }
+
+  function hideFatherMatchHint() {
+    fatherMatchHint.classList.add('hidden');
+    fatherMatchHint.innerHTML = '';
+  }
+
+  function showFatherMatchHint(html) {
+    fatherMatchHint.innerHTML = html;
+    fatherMatchHint.classList.remove('hidden');
+  }
+
+  function selectFatherCandidate(person) {
+    fatherSelect.value = person.id;
+    showFatherMatchHint(`✓ Dipadankan secara automatik dengan <strong>${escapeHtml(person.firstName + ' ' + person.lastName)}</strong>. Tukar di bahagian "Bapa" di bawah jika tidak tepat.`);
+  }
+
+  function checkFatherNameMatch() {
+    const query = fatherNameInput.value.trim().toLowerCase();
+    if (!query) { hideFatherMatchHint(); return; }
+    const candidates = state.people.filter((p) => (
+      p.id !== formState.editingId &&
+      p.gender !== 'female' &&
+      p.firstName.trim().toLowerCase() === query
+    ));
+    if (candidates.length === 1) {
+      selectFatherCandidate(candidates[0]);
+    } else if (candidates.length > 1) {
+      const buttons = candidates
+        .map((p) => `<button type="button" data-candidate-id="${p.id}">${escapeHtml(p.firstName + ' ' + p.lastName)}</button>`)
+        .join('');
+      showFatherMatchHint(`Beberapa padanan ditemui untuk "${escapeHtml(fatherNameInput.value.trim())}" — pilih yang betul:<div class="match-candidates">${buttons}</div>`);
+      fatherMatchHint.querySelectorAll('[data-candidate-id]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const person = state.peopleById.get(Number(btn.getAttribute('data-candidate-id')));
+          if (person) selectFatherCandidate(person);
+        });
+      });
+    } else {
+      hideFatherMatchHint();
+    }
+  }
+
+  fatherNameInput.addEventListener('blur', checkFatherNameMatch);
+  genderSelect.addEventListener('change', () => {
+    binBintiSelect.value = genderSelect.value === 'female' ? 'Binti' : 'Bin';
+  });
+
   function openPersonModal({ mode, personId, preset, pendingSpouseOf, pendingParentOf }) {
     personForm.reset();
     formState.editingId = mode === 'edit' ? personId : null;
@@ -735,6 +802,9 @@
     formState.pendingPhotoBlob = null;
     photoPreview.classList.add('hidden');
     photoPreview.removeAttribute('src');
+    hideFatherMatchHint();
+    binBintiSelect.value = 'Bin';
+    fatherNameInput.value = '';
 
     populateParentSelects(mode === 'edit' ? personId : null);
 
@@ -742,8 +812,10 @@
       const p = state.peopleById.get(personId);
       personModalTitle.textContent = 'Sunting Orang';
       document.getElementById('firstName').value = p.firstName || '';
-      document.getElementById('lastName').value = p.lastName || '';
       document.getElementById('gender').value = p.gender || 'unknown';
+      const { binBinti, fatherName } = parseBinBinti(p.lastName, p.gender);
+      binBintiSelect.value = binBinti;
+      fatherNameInput.value = fatherName;
       document.getElementById('birthDate').value = p.birthDate || '';
       document.getElementById('deathDate').value = p.deathDate || '';
       document.getElementById('bio').value = p.bio || '';
@@ -757,6 +829,7 @@
       deletePersonBtn.classList.remove('hidden');
       spouseSection.classList.remove('hidden');
       renderSpouseSection(personId);
+      if (!p.fatherId && fatherName) checkFatherNameMatch();
     } else {
       personModalTitle.textContent = 'Tambah Orang';
       deletePersonBtn.classList.add('hidden');
@@ -764,7 +837,10 @@
       if (preset) {
         if (preset.fatherId) fatherSelect.value = preset.fatherId;
         if (preset.motherId) motherSelect.value = preset.motherId;
-        if (preset.gender) document.getElementById('gender').value = preset.gender;
+        if (preset.gender) {
+          document.getElementById('gender').value = preset.gender;
+          binBintiSelect.value = preset.gender === 'female' ? 'Binti' : 'Bin';
+        }
       }
     }
 
@@ -797,7 +873,7 @@
       }
       const payload = {
         firstName: document.getElementById('firstName').value.trim(),
-        lastName: document.getElementById('lastName').value.trim(),
+        lastName: buildLastName(),
         gender: document.getElementById('gender').value,
         birthDate: document.getElementById('birthDate').value.trim() || null,
         deathDate: document.getElementById('deathDate').value.trim() || null,

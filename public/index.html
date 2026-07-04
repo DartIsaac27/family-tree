@@ -56,10 +56,7 @@
       <form id="personForm">
         <input type="hidden" id="personId" />
         <div class="form-row">
-          <label>Nama pertama *<input type="text" id="firstName" required /></label>
-          <label>Nama akhir<input type="text" id="lastName" /></label>
-        </div>
-        <div class="form-row">
+          <label>Nama *<input type="text" id="firstName" required /></label>
           <label>Jantina
             <select id="gender">
               <option value="unknown">Tidak dinyatakan</option>
@@ -67,6 +64,18 @@
               <option value="male">Lelaki</option>
             </select>
           </label>
+        </div>
+        <div class="form-row">
+          <label>Bin/Binti
+            <select id="binBinti">
+              <option value="Bin">Bin</option>
+              <option value="Binti">Binti</option>
+            </select>
+          </label>
+          <label>Nama bapa (untuk bin/binti)<input type="text" id="fatherNameText" placeholder="cth. Abdullah" /></label>
+        </div>
+        <div id="fatherMatchHint" class="auto-match-hint hidden"></div>
+        <div class="form-row">
           <label>Gambar
             <input type="file" id="photoFile" accept="image/*" />
             <img id="photoPreview" class="photo-preview hidden" alt="Pratonton gambar" />
