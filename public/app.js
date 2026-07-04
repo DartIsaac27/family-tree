@@ -67,17 +67,6 @@
   const linkPersonCreateNewBtn = document.getElementById('linkPersonCreateNewBtn');
   const linkPersonCancelBtn = document.getElementById('linkPersonCancelBtn');
 
-  const passcodeModal = document.getElementById('passcodeModal');
-  const passcodeInput = document.getElementById('passcodeInput');
-  const passcodeError = document.getElementById('passcodeError');
-  const passcodeSubmitBtn = document.getElementById('passcodeSubmitBtn');
-  const passcodeCancelBtn = document.getElementById('passcodeCancelBtn');
-  const adminLoginBtn = document.getElementById('adminLoginBtn');
-  const adminLogoutBtn = document.getElementById('adminLogoutBtn');
-  const exportBackupBtn = document.getElementById('exportBackupBtn');
-  const importBackupBtn = document.getElementById('importBackupBtn');
-  const importBackupInput = document.getElementById('importBackupInput');
-
   const authArea = document.getElementById('authArea');
   const googleSignInBtnContainer = document.getElementById('googleSignInBtn');
   const googleNotConfiguredNote = document.getElementById('googleNotConfiguredNote');
@@ -123,7 +112,6 @@
   function hideOverlayDom(name) {
     if (name === 'detailPanel') { detailPanel.classList.add('hidden'); currentDetailId = null; }
     else if (name === 'personModal') { personModal.classList.add('hidden'); }
-    else if (name === 'passcodeModal') { passcodeModal.classList.add('hidden'); }
     else if (name === 'cropModal') { cropModal.classList.add('hidden'); }
     else if (name === 'linkPersonModal') { linkPersonModal.classList.add('hidden'); }
     else if (name === 'userAdminModal') { userAdminModal.classList.add('hidden'); }
@@ -155,123 +143,20 @@
   function closeDetailPanel() { closeOverlay('detailPanel', false); }
   function closePersonModal() { closeOverlay('personModal', false); }
 
-  // ---- admin login (only gates downloading a backup) ----
-
-  function getAdminPasscode() { return localStorage.getItem('familyTreeAdminPasscode') || ''; }
-  function setAdminPasscode(pc) { localStorage.setItem('familyTreeAdminPasscode', pc); }
-  function clearAdminPasscode() { localStorage.removeItem('familyTreeAdminPasscode'); }
-
-  let isAdminLoggedIn = false;
-
-  function updateAdminUI() {
-    adminLoginBtn.classList.toggle('hidden', isAdminLoggedIn);
-    exportBackupBtn.classList.toggle('hidden', !isAdminLoggedIn);
-    importBackupBtn.classList.toggle('hidden', !isAdminLoggedIn);
-    adminLogoutBtn.classList.toggle('hidden', !isAdminLoggedIn);
-  }
-
-  async function verifyStoredAdminPasscode() {
-    const code = getAdminPasscode();
-    if (!code) { isAdminLoggedIn = false; updateAdminUI(); return; }
-    try {
-      const res = await fetch('/api/auth/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ passcode: code }),
-      });
-      const data = await res.json();
-      isAdminLoggedIn = Boolean(data.ok);
-    } catch {
-      isAdminLoggedIn = false;
-    }
-    if (!isAdminLoggedIn) clearAdminPasscode();
-    updateAdminUI();
-  }
-
-  function openAdminLoginModal() {
-    return new Promise((resolve, reject) => {
-      passcodeError.classList.add('hidden');
-      passcodeInput.value = '';
-      passcodeModal.classList.remove('hidden');
-      openOverlay('passcodeModal');
-      passcodeInput.focus();
-
-      function cleanupListeners() {
-        passcodeSubmitBtn.removeEventListener('click', submit);
-        passcodeCancelBtn.removeEventListener('click', cancelBtn);
-        passcodeInput.removeEventListener('keydown', onKeydown);
-      }
-      async function submit() {
-        const code = passcodeInput.value.trim();
-        const res = await fetch('/api/auth/verify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ passcode: code }),
-        });
-        const data = await res.json();
-        if (data.ok) {
-          setAdminPasscode(code);
-          delete overlayCloseHandlers.passcodeModal;
-          cleanupListeners();
-          closeOverlay('passcodeModal', false);
-          resolve();
-        } else {
-          passcodeError.classList.remove('hidden');
-        }
-      }
-      function cancelBtn() { closeOverlay('passcodeModal', false); }
-      function onKeydown(e) { if (e.key === 'Enter') submit(); }
-
-      overlayCloseHandlers.passcodeModal = () => {
-        cleanupListeners();
-        reject(new Error('cancelled'));
-      };
-
-      passcodeSubmitBtn.addEventListener('click', submit);
-      passcodeCancelBtn.addEventListener('click', cancelBtn);
-      passcodeInput.addEventListener('keydown', onKeydown);
-    });
-  }
-
-  adminLoginBtn.addEventListener('click', async () => {
-    try {
-      await openAdminLoginModal();
-      isAdminLoggedIn = true;
-      updateAdminUI();
-    } catch {
-      // login cancelled - stay logged out
-    }
-  });
-
-  adminLogoutBtn.addEventListener('click', () => {
-    clearAdminPasscode();
-    isAdminLoggedIn = false;
-    updateAdminUI();
-  });
-
-  async function adminFetch(url, options = {}) {
-    const res = await fetch(url, {
-      ...options,
-      headers: { ...(options.headers || {}), 'x-admin-passcode': getAdminPasscode() },
-    });
-    if (res.status === 401) {
-      isAdminLoggedIn = false;
-      clearAdminPasscode();
-      updateAdminUI();
-      throw new Error('Sesi admin tamat. Sila log masuk semula.');
-    }
-    return res;
-  }
-
   // ---- Google login (per-person accounts; gates add/edit/delete, not viewing) ----
 
   let currentUser = null;
+  let googleConfigured = false;
 
   function updateAuthUI() {
     const loggedIn = !!currentUser;
     userInfoEl.classList.toggle('hidden', !loggedIn);
-    googleSignInBtnContainer.classList.toggle('hidden', loggedIn);
-    if (loggedIn) googleNotConfiguredNote.classList.add('hidden');
+    if (loggedIn) {
+      googleSignInBtnContainer.classList.add('hidden');
+      googleNotConfiguredNote.classList.add('hidden');
+    } else if (googleConfigured) {
+      googleSignInBtnContainer.classList.remove('hidden');
+    }
     manageUsersBtn.classList.toggle('hidden', !(loggedIn && currentUser.isAdmin));
     addPersonBtn.classList.toggle('hidden', !loggedIn);
     addFirstPersonBtn.classList.toggle('hidden', !loggedIn);
@@ -313,6 +198,16 @@
   }
   window.__familyTreeGoogleCallback = handleGoogleCredential;
 
+  function renderGoogleButton() {
+    if (!window.google || !window.google.accounts) return;
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    googleSignInBtnContainer.innerHTML = '';
+    window.google.accounts.id.renderButton(googleSignInBtnContainer, {
+      theme: isDark ? 'filled_black' : 'outline',
+      size: 'medium',
+    });
+  }
+
   async function initGoogleSignIn() {
     const res = await fetch('/api/config');
     const { googleClientId } = await res.json();
@@ -328,7 +223,9 @@
     });
     await waitForGoogle();
     window.google.accounts.id.initialize({ client_id: googleClientId, callback: handleGoogleCredential });
-    window.google.accounts.id.renderButton(googleSignInBtnContainer, { theme: 'outline', size: 'medium' });
+    renderGoogleButton();
+    googleConfigured = true;
+    if (!currentUser) googleSignInBtnContainer.classList.remove('hidden');
   }
 
   userLogoutBtn.addEventListener('click', async () => {
@@ -1245,51 +1142,6 @@
 
   document.getElementById('zoomFitBtn').addEventListener('click', fitView);
 
-  exportBackupBtn.addEventListener('click', async () => {
-    try {
-      const res = await adminFetch('/api/backup/export');
-      if (!res.ok) throw new Error('Sandaran gagal');
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `family-tree-backup-${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      if (err.message !== 'cancelled') alert(err.message || 'Sandaran gagal');
-    }
-  });
-
-  importBackupBtn.addEventListener('click', () => importBackupInput.click());
-
-  importBackupInput.addEventListener('change', async () => {
-    const file = importBackupInput.files[0];
-    importBackupInput.value = '';
-    if (!file) return;
-    if (!confirm('Ini akan MENGGANTIKAN semua data semasa dengan kandungan fail sandaran ini. Teruskan?')) return;
-    try {
-      const text = await file.text();
-      const data = JSON.parse(text);
-      const res = await adminFetch('/api/backup/import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => ({}));
-        throw new Error(errBody.error || 'Pemulihan gagal');
-      }
-      await loadData();
-      fitView();
-      alert('Data sandaran berjaya dipulihkan.');
-    } catch (err) {
-      if (err.message !== 'cancelled') alert(err.message || 'Pemulihan gagal. Pastikan fail itu adalah fail sandaran yang sah.');
-    }
-  });
-
   // ---- theme (dark / light) ----
 
   const themeToggleBtn = document.getElementById('themeToggleBtn');
@@ -1302,6 +1154,7 @@
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('familyTreeTheme', theme);
     updateThemeToggleIcon(theme);
+    renderGoogleButton();
   }
 
   updateThemeToggleIcon(document.documentElement.getAttribute('data-theme') || 'light');
@@ -1313,7 +1166,6 @@
 
   // ---- init ----
   loadData().then(fitView);
-  verifyStoredAdminPasscode();
   initGoogleSignIn();
   refreshCurrentUser().then(maybeShowTour);
 })();

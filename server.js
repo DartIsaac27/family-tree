@@ -11,7 +11,6 @@ const { OAuth2Client } = require('google-auth-library');
 
 const { client, ready } = require('./db');
 const {
-  PASSCODE, requireAdmin, timingSafeEqual,
   SESSION_COOKIE, SESSION_MAX_AGE_MS, createSessionToken, verifySessionToken, isAdminEmail,
 } = require('./auth');
 
@@ -119,11 +118,6 @@ app.get('/api/people', asyncRoute(async (req, res) => {
   const spousePairs = await getAllSpousePairs();
   res.json({ people, spousePairs });
 }));
-
-app.post('/api/auth/verify', (req, res) => {
-  const { passcode } = req.body || {};
-  res.json({ ok: timingSafeEqual(passcode || '', PASSCODE) });
-});
 
 // ---- Google login (per-person accounts, gates editing) ----
 
@@ -323,84 +317,11 @@ app.get('/api/photos/:id', asyncRoute(async (req, res) => {
   res.send(Buffer.from(row.data));
 }));
 
-// ---- backup / restore (admin-only) ----
-
-app.get('/api/backup/export', requireAdmin, asyncRoute(async (req, res) => {
-  const peopleResult = await client.execute('SELECT * FROM people ORDER BY id');
-  const people = peopleResult.rows.map(personRow);
-  const spousePairs = await getAllSpousePairs();
-
-  const photos = {};
-  for (const p of people) {
-    if (p.photoPath && !photos[p.photoPath]) {
-      const photoId = p.photoPath.split('/').pop();
-      const photoResult = await client.execute({ sql: 'SELECT content_type, data FROM photos WHERE id = ?', args: [photoId] });
-      const row = photoResult.rows[0];
-      if (row) {
-        photos[p.photoPath] = { contentType: row.content_type, data: Buffer.from(row.data).toString('base64') };
-      }
-    }
-  }
-
-  res.setHeader('Content-Disposition', 'attachment; filename="family-tree-backup.json"');
-  res.json({ exportedAt: new Date().toISOString(), people, spousePairs, photos });
-}));
-
-app.post('/api/backup/import', requireAdmin, asyncRoute(async (req, res) => {
-  const { people, spousePairs, photos } = req.body || {};
-  if (!Array.isArray(people) || !Array.isArray(spousePairs)) {
-    return res.status(400).json({ error: 'Fail sandaran mesti mengandungi array "people" dan "spousePairs"' });
-  }
-
-  const statements = [
-    { sql: 'DELETE FROM spouses', args: [] },
-    { sql: 'DELETE FROM people', args: [] },
-    { sql: 'DELETE FROM photos', args: [] },
-  ];
-  people.forEach((p) => {
-    statements.push({
-      sql: `INSERT INTO people (id, first_name, last_name, gender, birth_date, death_date, bio, photo_path, father_id, mother_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [
-        p.id, p.firstName, p.lastName || '', p.gender || 'unknown',
-        p.birthDate || null, p.deathDate || null, p.bio || null, p.photoPath || null,
-        p.fatherId || null, p.motherId || null,
-      ],
-    });
-  });
-  spousePairs.forEach(({ personId, spouseId }) => {
-    const [lo, hi] = personId < spouseId ? [personId, spouseId] : [spouseId, personId];
-    statements.push({ sql: 'INSERT OR IGNORE INTO spouses (person_id, spouse_id) VALUES (?, ?)', args: [lo, hi] });
-  });
-  if (photos && typeof photos === 'object') {
-    Object.entries(photos).forEach(([photoPath, photoData]) => {
-      const id = photoPath.split('/').pop();
-      const contentType = (photoData && photoData.contentType) || 'image/jpeg';
-      const base64 = (photoData && photoData.data) || photoData;
-      if (typeof base64 !== 'string') return;
-      statements.push({
-        sql: 'INSERT INTO photos (id, content_type, data) VALUES (?, ?, ?)',
-        args: [id, contentType, Buffer.from(base64, 'base64')],
-      });
-    });
-  }
-
-  try {
-    await client.batch(statements, 'write');
-  } catch (err) {
-    return res.status(400).json({ error: 'Import gagal: ' + err.message });
-  }
-  res.json({ ok: true, imported: people.length });
-}));
-
 ready
   .then(() => {
     app.listen(PORT, () => {
       console.log(`Family tree site running at http://localhost:${PORT}`);
       console.log(`Database: ${process.env.TURSO_DATABASE_URL ? 'Turso (remote)' : 'local SQLite file'}`);
-      if (!process.env.ADMIN_PASSCODE && !process.env.EDIT_PASSCODE) {
-        console.log(`Admin passcode (only needed to download/restore backups): ${PASSCODE}`);
-      }
     });
   })
   .catch((err) => {

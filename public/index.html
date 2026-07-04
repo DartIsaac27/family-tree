@@ -25,7 +25,7 @@
       <button id="themeToggleBtn" class="btn btn-secondary btn-icon" aria-label="Tukar tema gelap/terang" title="Tukar tema gelap/terang">🌙</button>
       <button id="zoomFitBtn" class="btn btn-secondary">Set Semula Paparan</button>
       <div id="authArea" class="auth-area">
-        <div id="googleSignInBtn"></div>
+        <div id="googleSignInBtn" class="google-btn-frame hidden"></div>
         <p id="googleNotConfiguredNote" class="muted-text auth-note hidden">Log masuk belum disediakan.</p>
         <div id="userInfo" class="user-info hidden">
           <img id="userAvatar" class="user-avatar hidden" alt="" />
@@ -34,11 +34,6 @@
         </div>
       </div>
       <button id="manageUsersBtn" class="btn btn-secondary hidden">Urus Pengguna</button>
-      <button id="adminLoginBtn" class="btn btn-secondary">Log Masuk Admin</button>
-      <button id="exportBackupBtn" class="btn btn-secondary hidden">Sandaran</button>
-      <button id="importBackupBtn" class="btn btn-secondary hidden">Muat Naik Sandaran</button>
-      <input type="file" id="importBackupInput" accept="application/json" class="hidden" />
-      <button id="adminLogoutBtn" class="btn btn-secondary hidden">Log Keluar</button>
       <button id="addPersonBtn" class="btn btn-primary hidden">+ Tambah Orang</button>
     </div>
   </header>
@@ -159,20 +154,6 @@
         <button type="button" id="tourSkipBtn" class="btn btn-secondary">Langkau</button>
         <div class="spacer"></div>
         <button type="button" id="tourNextBtn" class="btn btn-primary">Seterusnya</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Log masuk admin -->
-  <div id="passcodeModal" class="modal-overlay hidden">
-    <div class="modal modal-small">
-      <h2>Log Masuk Admin</h2>
-      <p>Menambah dan menyunting ahli keluarga terbuka untuk semua. Log masuk admin hanya diperlukan untuk memuat turun data sandaran.</p>
-      <input type="password" id="passcodeInput" placeholder="Kod laluan admin" />
-      <p id="passcodeError" class="error-text hidden">Kod laluan salah.</p>
-      <div class="modal-actions">
-        <button type="button" id="passcodeCancelBtn" class="btn btn-secondary">Batal</button>
-        <button type="button" id="passcodeSubmitBtn" class="btn btn-primary">Log Masuk</button>
       </div>
     </div>
   </div>

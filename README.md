@@ -3,13 +3,13 @@
 A small self-hosted family tree site: an interactive, pan/zoom tree diagram, search, and
 in-browser add/edit forms. Anyone with the link can view and search without logging in, but
 adding, editing, or deleting people requires signing in with Google — this is what lets an
-admin ban a misbehaving account. Downloading or restoring a full backup of the data are
-separate actions gated behind a shared admin passcode (unrelated to individual Google logins).
+admin ban a misbehaving account (see "Urus Pengguna" for whoever's email is in `ADMIN_EMAILS`).
 First-time visitors who log in see a short one-time walkthrough of how the site works.
 
-Backups are self-contained: uploaded photos are embedded in the backup JSON as base64 (not
-just referenced by path), so restoring a backup brings the photos back too, not just the names
-and relationships.
+Since data (and photos, as BLOBs) live in Turso rather than on local disk, backups are just a
+matter of exporting from Turso directly (`turso db shell <db-name> .dump`, or the SQL Console
+in the [Turso dashboard](https://app.turso.tech)) — there's no separate backup/restore feature
+built into the website itself.
 
 ## Running it locally
 
@@ -20,20 +20,6 @@ npm start
 
 Then open http://localhost:3000. With no further setup, it uses a plain local SQLite file
 (`data/family.db`) — nothing else to configure for local development.
-
-On first run the server also generates a random admin passcode and prints it to the terminal:
-
-```
-Admin passcode (only needed to download/restore backups): aabd0ff7
-```
-
-That passcode is only needed if you click "Log Masuk Admin" (Admin Login) to download
-(Sandaran) or restore (Muat Naik Sandaran) a backup — it's saved to `data/admin-passcode.txt`
-so it stays the same across restarts. You can set your own instead via the `ADMIN_PASSCODE`
-environment variable (the older `EDIT_PASSCODE` name still works too, for compatibility).
-
-**Restoring a backup replaces all current data** — it intentionally overwrites whatever's
-currently there rather than merging, since the point is to recover a full known-good state.
 
 Without `GOOGLE_CLIENT_ID` set, local dev still runs, but nobody can log in or add/edit — see
 "Setting up Google Sign-In" below to enable that. Once you have a Client ID, set it in `.env`
@@ -55,15 +41,13 @@ along with (optionally, for testing the admin ban panel) `ADMIN_EMAILS=you@examp
 - **Backend:** `server.js` — a small Express API (`/api/people`, `/api/spouses`, `/api/photos`).
   Viewing (`GET` routes) is public. Adding/editing/deleting people requires a Google login
   (session cookie, checked by `requireUser` in `server.js`) — a banned account keeps its login
-  but gets a 403 on any write. `/api/backup/export` and `/api/backup/import` are separately
-  gated behind a shared admin passcode (`x-admin-passcode` header, see `auth.js`) — that's
-  unrelated to individual Google accounts.
+  but gets a 403 on any write.
 - **Accounts:** Google Sign-In (via Google Identity Services, loaded from a CDN) — the ID token
   is verified server-side with `google-auth-library`, then a signed session cookie is issued
   (`auth.js`, no external session store needed). A `users` table (`db.js`) tracks each Google
   account's status (`active`/`banned`) and whether they've completed the first-time tour.
   Whoever's email is listed in `ADMIN_EMAILS` gets access to a "Urus Pengguna" panel to ban/unban
-  accounts — this is separate from (and in addition to) the backup passcode above.
+  accounts.
 - **Frontend:** plain HTML/CSS/JS in `public/` — no build step. `app.js` computes a
   generation-based layout from parent/child and spouse relationships and renders it with D3
   (pan/zoom, search-to-focus, click-for-detail panel, add/edit modal). It also supports
@@ -84,9 +68,7 @@ To deploy:
    - `TURSO_AUTH_TOKEN`
    - `GOOGLE_CLIENT_ID` — see below
    - `ADMIN_EMAILS` — comma-separated Google account emails allowed to ban/unban users
-2. Also set `ADMIN_PASSCODE` to a passcode of your choosing (for backups; unrelated to Google
-   login).
-3. Build command: `npm install`. Start command: `npm start`.
+2. Build command: `npm install`. Start command: `npm start`.
 
 That's it — no disk, no volume, no paid plan required for data persistence.
 

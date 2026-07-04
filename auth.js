@@ -2,25 +2,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-const passcodeFile = path.join(__dirname, 'data', 'admin-passcode.txt');
-
-function loadOrCreatePasscode() {
-  const envValue = process.env.ADMIN_PASSCODE || process.env.EDIT_PASSCODE;
-  if (envValue) return envValue;
-
-  fs.mkdirSync(path.dirname(passcodeFile), { recursive: true });
-  if (fs.existsSync(passcodeFile)) {
-    const saved = fs.readFileSync(passcodeFile, 'utf8').trim();
-    if (saved) return saved;
-  }
-
-  const generated = crypto.randomBytes(4).toString('hex');
-  fs.writeFileSync(passcodeFile, generated, 'utf8');
-  return generated;
-}
-
-const PASSCODE = loadOrCreatePasscode();
-
 function timingSafeEqual(a, b) {
   const bufA = Buffer.from(String(a));
   const bufB = Buffer.from(String(b));
@@ -28,18 +9,10 @@ function timingSafeEqual(a, b) {
   return crypto.timingSafeEqual(bufA, bufB);
 }
 
-function requireAdmin(req, res, next) {
-  const provided = req.get('x-admin-passcode') || '';
-  if (!timingSafeEqual(provided, PASSCODE)) {
-    return res.status(401).json({ error: 'Kod laluan admin tidak sah atau tiada.' });
-  }
-  next();
-}
-
 // ---- Google login sessions ----
-// A separate concern from the admin passcode above: this is per-person login
-// (via Google) used to gate who may add/edit/delete family members, and to let
-// an admin (matched by email, see ADMIN_EMAILS) ban a misbehaving account.
+// Per-person login (via Google) used to gate who may add/edit/delete family
+// members, and to let an admin (matched by email, see ADMIN_EMAILS) ban a
+// misbehaving account.
 
 const sessionSecretFile = path.join(__dirname, 'data', 'session-secret.txt');
 const SESSION_COOKIE = 'fte_session';
@@ -92,6 +65,5 @@ function isAdminEmail(email) {
 }
 
 module.exports = {
-  PASSCODE, requireAdmin, timingSafeEqual,
   SESSION_COOKIE, SESSION_MAX_AGE_MS, createSessionToken, verifySessionToken, isAdminEmail,
 };
