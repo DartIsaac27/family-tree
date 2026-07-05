@@ -438,107 +438,147 @@
 
   // ---- layout computation ----
 
-  function computeGenerations(people) {
+  // People are grouped into "units" — a single person, or a married couple
+  // placed side by side — and each unit's horizontal footprint is computed
+  // bottom-up from its full subtree before any x-coordinates are assigned.
+  // This guarantees a family's own children always render directly beneath
+  // them: an in-law marrying into one family can only ever widen that
+  // family's own footprint, never push a *different* family's row out from
+  // under its own parents (which is what used to make connecting lines cut
+  // across unrelated cards — e.g. an unrelated couple's kids visually
+  // appearing to be another family's children just because of row packing).
+  function buildLayoutUnits(people) {
     const byId = state.peopleById;
-    const gen = new Map();
-    function computeGen(id, stack) {
-      if (gen.has(id)) return gen.get(id);
-      if (stack.has(id)) { gen.set(id, 0); return 0; }
-      stack.add(id);
-      const p = byId.get(id);
-      const parentGens = [];
-      if (p.fatherId && byId.has(p.fatherId)) parentGens.push(computeGen(p.fatherId, stack));
-      if (p.motherId && byId.has(p.motherId)) parentGens.push(computeGen(p.motherId, stack));
-      const g = parentGens.length ? Math.max(...parentGens) + 1 : 0;
-      stack.delete(id);
-      gen.set(id, g);
-      return g;
-    }
-    people.forEach((p) => computeGen(p.id, new Set()));
 
-    for (let pass = 0; pass < 5; pass++) {
-      let changed = false;
-      state.spousePairs.forEach(({ personId, spouseId }) => {
-        if (!gen.has(personId) || !gen.has(spouseId)) return;
-        const a = gen.get(personId), b = gen.get(spouseId);
-        if (a !== b) {
-          const m = Math.max(a, b);
-          gen.set(personId, m);
-          gen.set(spouseId, m);
-          changed = true;
-        }
-      });
-      if (!changed) break;
-    }
-    return gen;
-  }
-
-  function groupSpousesAdjacent(list, spousePairs) {
-    const idToSpouseIds = new Map();
-    spousePairs.forEach(({ personId, spouseId }) => {
-      if (!idToSpouseIds.has(personId)) idToSpouseIds.set(personId, []);
-      if (!idToSpouseIds.has(spouseId)) idToSpouseIds.set(spouseId, []);
-      idToSpouseIds.get(personId).push(spouseId);
-      idToSpouseIds.get(spouseId).push(personId);
+    // Each person gets at most one "primary" spouse for side-by-side
+    // placement; extra marriages (e.g. remarriage) still draw a spouse-line,
+    // just aren't forced adjacent.
+    const primaryPartner = new Map();
+    const claimed = new Set();
+    state.spousePairs.forEach(({ personId, spouseId }) => {
+      if (!byId.has(personId) || !byId.has(spouseId)) return;
+      if (claimed.has(personId) || claimed.has(spouseId)) return;
+      primaryPartner.set(personId, spouseId);
+      primaryPartner.set(spouseId, personId);
+      claimed.add(personId);
+      claimed.add(spouseId);
     });
-    const arr = list.slice();
-    const idxOf = (id) => arr.findIndex((p) => p.id === id);
-    const placed = new Set();
-    for (let i = 0; i < arr.length; i++) {
-      const p = arr[i];
-      if (placed.has(p.id)) continue;
-      placed.add(p.id);
-      const spouseIds = (idToSpouseIds.get(p.id) || []).filter((sid) => arr.some((x) => x.id === sid));
-      for (const sid of spouseIds) {
-        if (placed.has(sid)) continue;
-        const curIdx = idxOf(sid);
-        if (curIdx !== i + 1) {
-          const [item] = arr.splice(curIdx, 1);
-          arr.splice(i + 1, 0, item);
-        }
-        placed.add(sid);
-        break;
-      }
+
+    // Sibling groups keyed by exact father+mother pair, each anchored to one
+    // parent (father preferred) — so a parent who remarried only "owns" the
+    // children from that specific marriage, instead of every unit they
+    // belong to competing to claim them.
+    const childrenByParentKey = new Map();
+    people.forEach((p) => {
+      if (!p.fatherId && !p.motherId) return;
+      const key = `${p.fatherId || '_'}-${p.motherId || '_'}`;
+      if (!childrenByParentKey.has(key)) childrenByParentKey.set(key, []);
+      childrenByParentKey.get(key).push(p);
+    });
+    const keysByAnchor = new Map();
+    childrenByParentKey.forEach((kids, key) => {
+      const [fid, mid] = key.split('-').map((s) => (s === '_' ? null : Number(s)));
+      const anchorId = fid != null ? fid : mid;
+      if (!keysByAnchor.has(anchorId)) keysByAnchor.set(anchorId, []);
+      keysByAnchor.get(anchorId).push(kids);
+    });
+
+    const unitCache = new Map();
+    function unitFor(personId) {
+      if (unitCache.has(personId)) return unitCache.get(personId);
+      const partnerId = primaryPartner.get(personId);
+      const members = partnerId != null ? [personId, partnerId].sort((a, b) => a - b) : [personId];
+      const unit = { members, children: [], width: 1 };
+      unitCache.set(personId, unit);
+      if (partnerId != null) unitCache.set(partnerId, unit);
+      return unit;
     }
-    return arr;
+
+    // A unit is attached under exactly one parent unit — whichever is
+    // discovered first in this deterministic top-down walk — so a couple
+    // whose *both* sides have recorded parents doesn't get placed twice.
+    const attachedUnits = new Set();
+    function attach(unit) {
+      const childGroups = [];
+      unit.members.forEach((id) => (keysByAnchor.get(id) || []).forEach((kids) => childGroups.push(...kids)));
+      const seen = new Set();
+      const childUnits = [];
+      childGroups
+        .slice()
+        .sort((a, b) => a.id - b.id)
+        .forEach((child) => {
+          if (seen.has(child.id)) return;
+          const cu = unitFor(child.id);
+          cu.members.forEach((m) => seen.add(m));
+          if (attachedUnits.has(cu)) return;
+          attachedUnits.add(cu);
+          childUnits.push(cu);
+        });
+      childUnits.forEach(attach);
+      unit.children = childUnits;
+    }
+
+    const roots = [];
+    people
+      .filter((p) => !p.fatherId && !p.motherId)
+      .sort((a, b) => a.id - b.id)
+      .forEach((p) => {
+        const unit = unitFor(p.id);
+        const allMembersParentless = unit.members.every((id) => {
+          const person = byId.get(id);
+          return person && !person.fatherId && !person.motherId;
+        });
+        if (!allMembersParentless || attachedUnits.has(unit)) return;
+        attachedUnits.add(unit);
+        roots.push(unit);
+      });
+    roots.forEach(attach);
+
+    // Safety net: anyone unreachable from a root (broken/circular parent
+    // reference) still renders as its own root instead of silently vanishing.
+    people.forEach((p) => {
+      if (unitCache.has(p.id)) return;
+      roots.push(unitFor(p.id));
+    });
+
+    function computeWidth(unit) {
+      unit.children.forEach(computeWidth);
+      const childrenWidth = unit.children.reduce((sum, c) => sum + c.width, 0);
+      unit.width = Math.max(unit.members.length, childrenWidth, 1);
+    }
+    roots.forEach(computeWidth);
+
+    return roots;
   }
 
   function computeLayout() {
     const people = state.people;
-    const gen = computeGenerations(people);
-    const generationsMap = new Map();
-    people.forEach((p) => {
-      const g = gen.get(p.id);
-      if (!generationsMap.has(g)) generationsMap.set(g, []);
-      generationsMap.get(g).push(p);
-    });
-    const sortedGenKeys = [...generationsMap.keys()].sort((a, b) => a - b);
-
-    const xPos = new Map();
+    const peopleById = state.peopleById;
+    const roots = buildLayoutUnits(people);
     const nodes = [];
 
-    sortedGenKeys.forEach((g, genIdx) => {
-      let list = generationsMap.get(g);
-      if (genIdx === 0) {
-        list = list.slice().sort((a, b) => a.id - b.id);
-      } else {
-        const keyFor = (p) => {
-          const parentXs = [];
-          if (p.fatherId && xPos.has(p.fatherId)) parentXs.push(xPos.get(p.fatherId));
-          if (p.motherId && xPos.has(p.motherId)) parentXs.push(xPos.get(p.motherId));
-          if (parentXs.length) return parentXs.reduce((a, b) => a + b, 0) / parentXs.length;
-          return Infinity;
-        };
-        list = list.map((p) => ({ p, key: keyFor(p) }))
-          .sort((a, b) => a.key - b.key || a.p.id - b.p.id)
-          .map((o) => o.p);
-      }
-      list = groupSpousesAdjacent(list, state.spousePairs);
-      list.forEach((p, i) => {
-        const x = i * SPACING;
-        xPos.set(p.id, x);
-        nodes.push({ id: p.id, x, y: genIdx * V_GAP, person: p, generation: g });
+    function place(unit, leftX, depth) {
+      const span = unit.width * SPACING;
+      const membersWidth = unit.members.length * SPACING;
+      const membersLeft = leftX + (span - membersWidth) / 2;
+      unit.members.forEach((id, i) => {
+        const person = peopleById.get(id);
+        if (!person) return;
+        nodes.push({ id, x: membersLeft + i * SPACING, y: depth * V_GAP, person, generation: depth });
       });
+
+      let childCursor = leftX;
+      unit.children.forEach((child) => {
+        place(child, childCursor, depth + 1);
+        childCursor += child.width * SPACING;
+      });
+    }
+
+    let cursor = 0;
+    const ROOT_GAP_COLUMNS = 1; // extra empty column between unrelated root families
+    roots.forEach((unit) => {
+      place(unit, cursor, 0);
+      cursor += unit.width * SPACING + SPACING * ROOT_GAP_COLUMNS;
     });
 
     const nodesById = new Map(nodes.map((n) => [n.id, n]));
