@@ -583,13 +583,29 @@
 
     const nodesById = new Map(nodes.map((n) => [n.id, n]));
 
-    // spouse links
+    // spouse links: a primary couple sits in adjacent columns and gets a
+    // simple straight connector; a remarriage (a spouse who isn't the
+    // person's adjacent partner in the layout) can sit anywhere else in the
+    // same row, so its connector arcs up and over the top of any cards in
+    // between instead of drawing a straight line through them.
     const spouseLinks = [];
     state.spousePairs.forEach(({ personId, spouseId }) => {
       const a = nodesById.get(personId), b = nodesById.get(spouseId);
-      if (a && b && a.y === b.y) {
-        spouseLinks.push({ x1: a.x + NODE_W, y1: a.y + NODE_H / 2, x2: b.x, y2: b.y + NODE_H / 2 });
-        if (a.x > b.x) { spouseLinks[spouseLinks.length - 1] = { x1: b.x + NODE_W, y1: b.y + NODE_H / 2, x2: a.x, y2: a.y + NODE_H / 2 }; }
+      if (!a || !b || a.y !== b.y) return;
+      const left = a.x <= b.x ? a : b;
+      const right = a.x <= b.x ? b : a;
+      const gap = right.x - (left.x + NODE_W);
+      const midY = left.y + NODE_H / 2;
+      if (gap <= H_GAP + 1) {
+        spouseLinks.push({ path: `M ${left.x + NODE_W} ${midY} H ${right.x}`, arced: false });
+      } else {
+        const archY = left.y - 18;
+        const leftTopX = left.x + NODE_W / 2;
+        const rightTopX = right.x + NODE_W / 2;
+        spouseLinks.push({
+          path: `M ${leftTopX} ${left.y} V ${archY} H ${rightTopX} V ${right.y}`,
+          arced: true,
+        });
       }
     });
 
@@ -662,12 +678,11 @@
       .attr('class', 'link-line')
       .attr('d', (d) => d.path);
 
-    linksLayer.selectAll('line.spouse-line')
+    linksLayer.selectAll('path.spouse-line')
       .data(spouseLinks)
-      .join('line')
-      .attr('class', 'spouse-line')
-      .attr('x1', (d) => d.x1).attr('y1', (d) => d.y1)
-      .attr('x2', (d) => d.x2).attr('y2', (d) => d.y2);
+      .join('path')
+      .attr('class', (d) => `spouse-line${d.arced ? ' spouse-line-arced' : ''}`)
+      .attr('d', (d) => d.path);
 
     const nodeSel = nodesLayer.selectAll('g.node-card')
       .data(nodes, (d) => d.id)
