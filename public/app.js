@@ -450,18 +450,51 @@
   function buildLayoutUnits(people) {
     const byId = state.peopleById;
 
+    // How many spouses each person actually has recorded. A normal marriage
+    // (both sides have exactly one spouse) renders side by side. Someone
+    // with multiple marriages (e.g. remarried) instead becomes a standalone
+    // "hub" on its own row, with every spouse rendered one row below them —
+    // like an extra generation — and that marriage's children below that
+    // spouse. This keeps the common ancestor visually on top instead of
+    // squeezed sideways next to whichever marriage happened to be recorded first.
+    const spouseIdsOf = new Map();
+    state.spousePairs.forEach(({ personId, spouseId }) => {
+      if (!byId.has(personId) || !byId.has(spouseId)) return;
+      if (!spouseIdsOf.has(personId)) spouseIdsOf.set(personId, []);
+      if (!spouseIdsOf.has(spouseId)) spouseIdsOf.set(spouseId, []);
+      spouseIdsOf.get(personId).push(spouseId);
+      spouseIdsOf.get(spouseId).push(personId);
+    });
+    const degreeOf = (id) => (spouseIdsOf.get(id) || []).length;
+
     // Each person gets at most one "primary" spouse for side-by-side
-    // placement; extra marriages (e.g. remarriage) still draw a spouse-line,
-    // just aren't forced adjacent.
+    // placement — only when *both* sides have exactly one marriage.
     const primaryPartner = new Map();
     const claimed = new Set();
     state.spousePairs.forEach(({ personId, spouseId }) => {
       if (!byId.has(personId) || !byId.has(spouseId)) return;
+      if (degreeOf(personId) !== 1 || degreeOf(spouseId) !== 1) return;
       if (claimed.has(personId) || claimed.has(spouseId)) return;
       primaryPartner.set(personId, spouseId);
       primaryPartner.set(spouseId, personId);
       claimed.add(personId);
       claimed.add(spouseId);
+    });
+
+    // Remaining (non side-by-side) marriages are "stacked": the person with
+    // more marriages is the hub that stays on top (tie broken by smaller id),
+    // every other spouse renders as a row below the hub.
+    const stackedChildrenOf = new Map(); // hub personId -> [spouseId, ...]
+    const stackedAsChild = new Set(); // spouse ids rendered under a hub
+    state.spousePairs.forEach(({ personId, spouseId }) => {
+      if (!byId.has(personId) || !byId.has(spouseId)) return;
+      if (primaryPartner.get(personId) === spouseId) return; // already side-by-side
+      const dP = degreeOf(personId), dS = degreeOf(spouseId);
+      let hub = personId, sub = spouseId;
+      if (dS > dP || (dS === dP && spouseId < personId)) { hub = spouseId; sub = personId; }
+      if (!stackedChildrenOf.has(hub)) stackedChildrenOf.set(hub, []);
+      stackedChildrenOf.get(hub).push(sub);
+      stackedAsChild.add(sub);
     });
 
     // Sibling groups keyed by exact father+mother pair, each anchored to one
@@ -514,6 +547,18 @@
           attachedUnits.add(cu);
           childUnits.push(cu);
         });
+      unit.members.forEach((id) => {
+        (stackedChildrenOf.get(id) || [])
+          .slice()
+          .sort((a, b) => a - b)
+          .forEach((subId) => {
+            const su = unitFor(subId);
+            if (attachedUnits.has(su)) return;
+            attachedUnits.add(su);
+            su.isStackedSpouse = true;
+            childUnits.push(su);
+          });
+      });
       childUnits.forEach(attach);
       unit.children = childUnits;
     }
@@ -523,6 +568,7 @@
       .filter((p) => !p.fatherId && !p.motherId)
       .sort((a, b) => a.id - b.id)
       .forEach((p) => {
+        if (stackedAsChild.has(p.id)) return; // rendered under their hub spouse instead
         const unit = unitFor(p.id);
         const allMembersParentless = unit.members.every((id) => {
           const person = byId.get(id);
@@ -548,13 +594,13 @@
     }
     roots.forEach(computeWidth);
 
-    return roots;
+    return { roots, stackedChildrenOf };
   }
 
   function computeLayout() {
     const people = state.people;
     const peopleById = state.peopleById;
-    const roots = buildLayoutUnits(people);
+    const { roots, stackedChildrenOf } = buildLayoutUnits(people);
     const nodes = [];
 
     function place(unit, leftX, depth) {
@@ -620,11 +666,17 @@
 
     const parentLinks = [];
     groups.forEach(({ fatherId, motherId, children }) => {
-      const parentNodes = [fatherId, motherId].filter(Boolean).map((id) => nodesById.get(id)).filter(Boolean);
+      const parentNodesAll = [fatherId, motherId].filter(Boolean).map((id) => nodesById.get(id)).filter(Boolean);
       const childNodes = children.map((c) => nodesById.get(c.id)).filter(Boolean);
-      if (!parentNodes.length || !childNodes.length) return;
+      if (!parentNodesAll.length || !childNodes.length) return;
+      // If one parent is a stacked hub sitting a row above the other (e.g.
+      // Fatima above Hashim), only the parent on the row actually adjacent
+      // to the children anchors the bus line — the hub is already linked
+      // down to that parent by its own stack connector.
+      const deepestY = Math.max(...parentNodesAll.map((n) => n.y));
+      const parentNodes = parentNodesAll.filter((n) => n.y === deepestY);
       const parentMidX = parentNodes.reduce((s, n) => s + n.x + NODE_W / 2, 0) / parentNodes.length;
-      const parentBottomY = Math.min(...parentNodes.map((n) => n.y)) + NODE_H;
+      const parentBottomY = deepestY + NODE_H;
       const childTopY = Math.min(...childNodes.map((n) => n.y));
       const busY = parentBottomY + (childTopY - parentBottomY) / 2;
       const childXs = childNodes.map((n) => n.x + NODE_W / 2);
@@ -638,6 +690,24 @@
         path += ` M ${cx} ${busY} V ${n.y}`;
       });
       parentLinks.push({ path });
+    });
+
+    // Vertical marriage connectors for stacked spouses (hub on top, each
+    // spouse rendered as a row below them).
+    stackedChildrenOf.forEach((subIds, hubId) => {
+      const hubNode = nodesById.get(hubId);
+      if (!hubNode) return;
+      subIds.forEach((subId) => {
+        const subNode = nodesById.get(subId);
+        if (!subNode) return;
+        const hubCx = hubNode.x + NODE_W / 2;
+        const subCx = subNode.x + NODE_W / 2;
+        const midY = hubNode.y + NODE_H + (subNode.y - (hubNode.y + NODE_H)) / 2;
+        spouseLinks.push({
+          path: `M ${hubCx} ${hubNode.y + NODE_H} V ${midY} H ${subCx} V ${subNode.y}`,
+          arced: false,
+        });
+      });
     });
 
     state.nodesById = nodesById;
