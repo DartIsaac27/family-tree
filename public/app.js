@@ -62,6 +62,8 @@
   const linksLayer = viewport.append('g').attr('class', 'links-layer');
   const nodesLayer = viewport.append('g').attr('class', 'nodes-layer');
   const emptyState = document.getElementById('emptyState');
+  const branchFilterSelect = document.getElementById('branchFilterSelect');
+  const branchFilterClearBtn = document.getElementById('branchFilterClearBtn');
 
   const detailPanel = document.getElementById('detailPanel');
   const detailContent = document.getElementById('detailContent');
@@ -432,6 +434,7 @@
     state.people = data.people;
     state.spousePairs = data.spousePairs;
     state.peopleById = new Map(state.people.map((p) => [p.id, p]));
+    populateBranchFilterSelect();
     render();
     refreshFamilyMapIfActive();
   }
@@ -450,6 +453,13 @@
   function buildLayoutUnits(people) {
     const byId = state.peopleById;
 
+    // When rendering a filtered branch (see collectFamilyBranch), `people` is
+    // only a subset of state.people. Parent/spouse relationships that point
+    // outside this subset must be ignored — otherwise a person just outside
+    // the chosen branch would still get pulled in as a rendered node.
+    const presentIds = new Set(people.map((p) => p.id));
+    const hasParentInSet = (p) => (p.fatherId && presentIds.has(p.fatherId)) || (p.motherId && presentIds.has(p.motherId));
+
     // How many spouses each person actually has recorded. A normal marriage
     // (both sides have exactly one spouse) renders side by side. Someone
     // with multiple marriages (e.g. remarried) instead becomes a standalone
@@ -459,7 +469,7 @@
     // squeezed sideways next to whichever marriage happened to be recorded first.
     const spouseIdsOf = new Map();
     state.spousePairs.forEach(({ personId, spouseId }) => {
-      if (!byId.has(personId) || !byId.has(spouseId)) return;
+      if (!presentIds.has(personId) || !presentIds.has(spouseId)) return;
       if (!spouseIdsOf.has(personId)) spouseIdsOf.set(personId, []);
       if (!spouseIdsOf.has(spouseId)) spouseIdsOf.set(spouseId, []);
       spouseIdsOf.get(personId).push(spouseId);
@@ -472,7 +482,7 @@
     const primaryPartner = new Map();
     const claimed = new Set();
     state.spousePairs.forEach(({ personId, spouseId }) => {
-      if (!byId.has(personId) || !byId.has(spouseId)) return;
+      if (!presentIds.has(personId) || !presentIds.has(spouseId)) return;
       if (degreeOf(personId) !== 1 || degreeOf(spouseId) !== 1) return;
       if (claimed.has(personId) || claimed.has(spouseId)) return;
       primaryPartner.set(personId, spouseId);
@@ -487,7 +497,7 @@
     const stackedChildrenOf = new Map(); // hub personId -> [spouseId, ...]
     const stackedAsChild = new Set(); // spouse ids rendered under a hub
     state.spousePairs.forEach(({ personId, spouseId }) => {
-      if (!byId.has(personId) || !byId.has(spouseId)) return;
+      if (!presentIds.has(personId) || !presentIds.has(spouseId)) return;
       if (primaryPartner.get(personId) === spouseId) return; // already side-by-side
       const dP = degreeOf(personId), dS = degreeOf(spouseId);
       let hub = personId, sub = spouseId;
@@ -500,11 +510,14 @@
     // Sibling groups keyed by exact father+mother pair, each anchored to one
     // parent (father preferred) — so a parent who remarried only "owns" the
     // children from that specific marriage, instead of every unit they
-    // belong to competing to claim them.
+    // belong to competing to claim them. Only parents present in this subset
+    // count — a filtered-out parent is treated the same as "unknown".
     const childrenByParentKey = new Map();
     people.forEach((p) => {
-      if (!p.fatherId && !p.motherId) return;
-      const key = `${p.fatherId || '_'}-${p.motherId || '_'}`;
+      if (!hasParentInSet(p)) return;
+      const fid = p.fatherId && presentIds.has(p.fatherId) ? p.fatherId : null;
+      const mid = p.motherId && presentIds.has(p.motherId) ? p.motherId : null;
+      const key = `${fid || '_'}-${mid || '_'}`;
       if (!childrenByParentKey.has(key)) childrenByParentKey.set(key, []);
       childrenByParentKey.get(key).push(p);
     });
@@ -565,14 +578,14 @@
 
     const roots = [];
     people
-      .filter((p) => !p.fatherId && !p.motherId)
+      .filter((p) => !hasParentInSet(p))
       .sort((a, b) => a.id - b.id)
       .forEach((p) => {
         if (stackedAsChild.has(p.id)) return; // rendered under their hub spouse instead
         const unit = unitFor(p.id);
         const allMembersParentless = unit.members.every((id) => {
           const person = byId.get(id);
-          return person && !person.fatherId && !person.motherId;
+          return person && !hasParentInSet(person);
         });
         if (!allMembersParentless || attachedUnits.has(unit)) return;
         attachedUnits.add(unit);
@@ -597,8 +610,8 @@
     return { roots, stackedChildrenOf };
   }
 
-  function computeLayout() {
-    const people = state.people;
+  function computeLayout(peopleOverride) {
+    const people = peopleOverride || state.people;
     const peopleById = state.peopleById;
     const { roots, stackedChildrenOf } = buildLayoutUnits(people);
     const nodes = [];
@@ -731,6 +744,73 @@
 
   let highlightedId = null;
   let currentDetailId = null;
+  let focusPersonId = null;
+
+  // ---- family branch filter (show only one person's own section of the tree) ----
+
+  // A person's "branch" is themself, their spouse(s), and every descendant
+  // (plus those descendants' spouses) reached by following fatherId/motherId
+  // down from there. This lets someone pick e.g. their father/grandfather and
+  // see just that slice instead of the whole (wide, hard-to-scan-on-mobile) tree.
+  function collectFamilyBranch(rootId) {
+    const included = new Set([rootId]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      state.spousePairs.forEach(({ personId, spouseId }) => {
+        if (included.has(personId) && !included.has(spouseId)) { included.add(spouseId); changed = true; }
+        if (included.has(spouseId) && !included.has(personId)) { included.add(personId); changed = true; }
+      });
+      state.people.forEach((p) => {
+        if (included.has(p.id)) return;
+        if ((p.fatherId && included.has(p.fatherId)) || (p.motherId && included.has(p.motherId))) {
+          included.add(p.id);
+          changed = true;
+        }
+      });
+    }
+    return included;
+  }
+
+  function getVisiblePeople() {
+    if (!focusPersonId || !state.peopleById.has(focusPersonId)) return state.people;
+    const included = collectFamilyBranch(focusPersonId);
+    return state.people.filter((p) => included.has(p.id));
+  }
+
+  function populateBranchFilterSelect() {
+    const current = branchFilterSelect.value;
+    branchFilterSelect.innerHTML = '<option value="">Semua pokok keluarga</option>';
+    state.people
+      .slice()
+      .sort((a, b) => (a.firstName + a.lastName).localeCompare(b.firstName + b.lastName))
+      .forEach((p) => {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = `${p.firstName} ${p.lastName}`;
+        branchFilterSelect.appendChild(opt);
+      });
+    branchFilterSelect.value = focusPersonId && state.peopleById.has(focusPersonId) ? String(focusPersonId) : (current || '');
+    if (branchFilterSelect.value !== String(focusPersonId || '')) {
+      // the previously-selected person no longer exists (e.g. deleted) — reset
+      focusPersonId = null;
+      branchFilterSelect.value = '';
+    }
+    branchFilterClearBtn.classList.toggle('hidden', !focusPersonId);
+  }
+
+  function setFocusPerson(id) {
+    focusPersonId = id || null;
+    branchFilterSelect.value = focusPersonId ? String(focusPersonId) : '';
+    branchFilterClearBtn.classList.toggle('hidden', !focusPersonId);
+    render();
+    fitView();
+  }
+
+  branchFilterSelect.addEventListener('change', () => {
+    setFocusPerson(branchFilterSelect.value ? Number(branchFilterSelect.value) : null);
+  });
+  branchFilterClearBtn.addEventListener('click', () => setFocusPerson(null));
 
   function render() {
     emptyState.classList.toggle('hidden', state.people.length > 0);
@@ -740,7 +820,7 @@
       return;
     }
 
-    const { nodes, spouseLinks, parentLinks } = computeLayout();
+    const { nodes, spouseLinks, parentLinks } = computeLayout(getVisiblePeople());
 
     linksLayer.selectAll('path.link-line')
       .data(parentLinks)
@@ -960,6 +1040,9 @@
     const nameWithNickname = p.nickname ? `${p.firstName} ${p.lastName} (${p.nickname})` : `${p.firstName} ${p.lastName}`;
     html += `<h2 class="detail-name">${escapeHtml(nameWithNickname)}</h2>`;
     html += `<p class="detail-years">${escapeHtml(years(p))}</p>`;
+    html += focusPersonId === id
+      ? `<button type="button" class="btn btn-secondary" data-clear-branch style="margin-bottom:8px;">✕ Papar pokok penuh semula</button>`
+      : `<button type="button" class="btn btn-secondary" data-focus-branch style="margin-bottom:8px;">🔎 Papar cabang keluarga ini sahaja</button>`;
     if (p.bio) html += `<p>${escapeHtml(p.bio)}</p>`;
 
     if (p.state) html += `<div class="detail-section"><h4>Negeri</h4>${escapeHtml(p.state)}</div>`;
@@ -1002,6 +1085,15 @@
         showDetail(targetId);
         focusOnPerson(targetId);
       });
+    });
+    detailContent.querySelector('[data-focus-branch]')?.addEventListener('click', () => {
+      if (currentView !== 'tree') switchView('tree');
+      setFocusPerson(id);
+      showDetail(id);
+    });
+    detailContent.querySelector('[data-clear-branch]')?.addEventListener('click', () => {
+      setFocusPerson(null);
+      showDetail(id);
     });
     detailContent.querySelector('[data-edit]')?.addEventListener('click', () => openPersonModal({ mode: 'edit', personId: id }));
     detailContent.querySelector('[data-delete]')?.addEventListener('click', () => deletePerson(id));

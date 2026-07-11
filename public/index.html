@@ -44,6 +44,13 @@
   </header>
 
   <main id="treeContainer">
+    <div id="treeBranchFilter" class="tree-branch-filter">
+      <label for="branchFilterSelect">Papar cabang:</label>
+      <select id="branchFilterSelect">
+        <option value="">Semua pokok keluarga</option>
+      </select>
+      <button type="button" id="branchFilterClearBtn" class="btn btn-secondary btn-icon hidden" title="Papar semua semula">✕ Semua</button>
+    </div>
     <svg id="treeSvg"></svg>
     <div id="emptyState" class="empty-state hidden">
       <h2>Salasilah keluarga anda masih kosong</h2>
