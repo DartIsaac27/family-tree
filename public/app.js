@@ -748,27 +748,31 @@
 
   // ---- family branch filter (show only one person's own section of the tree) ----
 
-  // A person's "branch" is themself, their spouse(s), and every descendant
-  // (plus those descendants' spouses) reached by following fatherId/motherId
-  // down from there. This lets someone pick e.g. their father/grandfather and
-  // see just that slice instead of the whole (wide, hard-to-scan-on-mobile) tree.
+  // A person's "branch" is their own blood descendants (following
+  // fatherId/motherId down from them, generation after generation) plus, at
+  // every generation, that person's own spouse(s) — but NOT a spouse's other
+  // children from a different marriage. So picking e.g. Hashim Bin Omar shows
+  // Hashim, his wife, and their shared children/grandchildren onward, without
+  // pulling in stepchildren his wife had with someone else. Two passes: first
+  // find the blood lineage, then add each blood member's own spouse(s).
   function collectFamilyBranch(rootId) {
-    const included = new Set([rootId]);
+    const blood = new Set([rootId]);
     let changed = true;
     while (changed) {
       changed = false;
-      state.spousePairs.forEach(({ personId, spouseId }) => {
-        if (included.has(personId) && !included.has(spouseId)) { included.add(spouseId); changed = true; }
-        if (included.has(spouseId) && !included.has(personId)) { included.add(personId); changed = true; }
-      });
       state.people.forEach((p) => {
-        if (included.has(p.id)) return;
-        if ((p.fatherId && included.has(p.fatherId)) || (p.motherId && included.has(p.motherId))) {
-          included.add(p.id);
+        if (blood.has(p.id)) return;
+        if ((p.fatherId && blood.has(p.fatherId)) || (p.motherId && blood.has(p.motherId))) {
+          blood.add(p.id);
           changed = true;
         }
       });
     }
+    const included = new Set(blood);
+    state.spousePairs.forEach(({ personId, spouseId }) => {
+      if (blood.has(personId)) included.add(spouseId);
+      if (blood.has(spouseId)) included.add(personId);
+    });
     return included;
   }
 
