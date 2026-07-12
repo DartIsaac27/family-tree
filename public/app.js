@@ -863,14 +863,17 @@
       .text((d) => (d.person.photoPath ? '' : initials(d.person)));
     nodeSel.select('text.name-text')
       .text((d) => {
-        const base = `${d.person.firstName} ${d.person.lastName}`.trim();
-        const full = d.person.nickname ? `${base} (${d.person.nickname})` : base;
-        return truncateToWidth(full, NAME_MAX_WIDTH, '600 13px "Segoe UI", system-ui, sans-serif');
+        const full = `${d.person.firstName} ${d.person.lastName}`.trim();
+        const display = d.person.nickname || full;
+        return truncateToWidth(display, NAME_MAX_WIDTH, '600 13px "Segoe UI", system-ui, sans-serif');
       });
     nodeSel.select('text.years-text')
       .text((d) => truncateToWidth(years(d.person), NAME_MAX_WIDTH, '11px "Segoe UI", system-ui, sans-serif'));
     nodeSel.select('title')
-      .text((d) => `${d.person.firstName} ${d.person.lastName}`.trim());
+      .text((d) => {
+        const full = `${d.person.firstName} ${d.person.lastName}`.trim();
+        return d.person.nickname ? `${full} (${d.person.nickname})` : full;
+      });
   }
 
   function contentBounds() {
