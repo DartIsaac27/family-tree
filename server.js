@@ -342,6 +342,19 @@ function duplicateMatches(values, id, allRows) {
   ).filter((m) => m.reason === 'same');
 }
 
+// An exact same name is refused; only an admin may confirm it really is a
+// different person (e.g. two cousins both named "Muhammad bin Ali").
+function adminOverride(req, b) {
+  return !!b.allowDuplicate && isAdminEmail(req.sessionUser.email);
+}
+
+function duplicateError(res, dupes) {
+  return sendError(res, 409, 'Nama ini sudah wujud dalam salasilah. Hanya admin boleh menyimpan nama yang sama.',
+    'This name already exists in the family tree. Only an admin can save the same name.', {
+      code: 'duplicate', matchIds: dupes.map((d) => d.person.id),
+    });
+}
+
 const PERSON_COLUMNS = ['first_name', 'last_name', 'nickname', 'gender', 'birth_date', 'death_date', 'is_deceased', 'bio',
   'photo_path', 'father_id', 'mother_id', 'state', 'birth_state', 'address', 'phone', 'lat', 'lng'];
 
@@ -354,11 +367,7 @@ app.post('/api/people', requireUser, asyncRoute(async (req, res) => {
   const parentErr = validateParents(values, null, all);
   if (parentErr) return sendError(res, 400, parentErr[0], parentErr[1]);
   const dupes = duplicateMatches(values, null, all);
-  if (dupes.length && !b.allowDuplicate) {
-    return sendError(res, 409, 'Nama ini sudah wujud dalam salasilah.', 'This name already exists in the family tree.', {
-      code: 'duplicate', matchIds: dupes.map((d) => d.person.id),
-    });
-  }
+  if (dupes.length && !adminOverride(req, b)) return duplicateError(res, dupes);
 
   Object.assign(values, await geocodeAddress(values.address, values.state));
   const result = await client.execute({
@@ -383,13 +392,9 @@ app.put('/api/people/:id', requireUser, asyncRoute(async (req, res) => {
   const parentErr = validateParents(values, id, all);
   if (parentErr) return sendError(res, 400, parentErr[0], parentErr[1]);
   const nameChanged = Names.nameKey(values.first_name, values.last_name) !== Names.nameKey(prev.first_name, prev.last_name);
-  if (nameChanged && !b.allowDuplicate) {
+  if (nameChanged && !adminOverride(req, b)) {
     const dupes = duplicateMatches(values, id, all);
-    if (dupes.length) {
-      return sendError(res, 409, 'Nama ini sudah wujud dalam salasilah.', 'This name already exists in the family tree.', {
-        code: 'duplicate', matchIds: dupes.map((d) => d.person.id),
-      });
-    }
+    if (dupes.length) return duplicateError(res, dupes);
   }
 
   values.lat = prev.lat;
