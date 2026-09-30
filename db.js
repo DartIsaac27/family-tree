@@ -20,6 +20,8 @@ const PEOPLE_COLUMNS_TO_ADD = [
   'phone TEXT',
   'lat REAL',
   'lng REAL',
+  'birth_state TEXT',
+  'is_deceased INTEGER NOT NULL DEFAULT 0',
 ];
 
 async function addColumnIfMissing(table, columnDef) {
@@ -55,6 +57,30 @@ const ready = client.batch([
     data BLOB NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
+  `CREATE TABLE IF NOT EXISTS albums (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    event_date TEXT,
+    description TEXT,
+    created_by TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+  `CREATE TABLE IF NOT EXISTS album_photos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    album_id INTEGER NOT NULL REFERENCES albums(id),
+    photo_id TEXT NOT NULL,
+    thumb_id TEXT,
+    caption TEXT,
+    width INTEGER,
+    height INTEGER,
+    uploaded_by TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+  `CREATE TABLE IF NOT EXISTS album_people (
+    album_id INTEGER NOT NULL REFERENCES albums(id),
+    person_id INTEGER NOT NULL REFERENCES people(id),
+    PRIMARY KEY (album_id, person_id)
+  )`,
   `CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     email TEXT NOT NULL,
@@ -69,6 +95,8 @@ const ready = client.batch([
   for (const columnDef of PEOPLE_COLUMNS_TO_ADD) {
     await addColumnIfMissing('people', columnDef);
   }
+  // Marriage order (1st, 2nd, 3rd husband/wife) for people married more than once.
+  await addColumnIfMissing('spouses', 'sort_order INTEGER');
 });
 
 module.exports = { client, ready };
