@@ -2,214 +2,67 @@
 <html lang="ms">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#8a5a44" />
 <title>Peta Pokok Fatimah</title>
 <script>
 (function () {
-  var stored = localStorage.getItem('familyTreeTheme');
-  var theme = stored || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  var theme = null;
+  try { theme = localStorage.getItem('familyTreeTheme'); } catch (e) {}
+  if (!theme) theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   document.documentElement.setAttribute('data-theme', theme);
 })();
 </script>
-<link rel="stylesheet" href="style.css" />
 <link rel="stylesheet" href="https://unpkg.com/cropperjs@1/dist/cropper.min.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <header class="topbar">
-    <h1>Peta Pokok Fatimah</h1>
-    <div class="search-wrap">
-      <input id="searchInput" type="text" placeholder="Cari seseorang..." autocomplete="off" />
-      <div id="searchResults" class="search-results hidden"></div>
+  <header class="appbar">
+    <button type="button" id="backBtn" class="icon-btn appbar-back hidden" data-i18n-label="common.back"></button>
+    <div class="appbar-title">
+      <span class="brand-mark" aria-hidden="true">🌳</span>
+      <h1 id="pageTitle"></h1>
     </div>
-    <div class="view-toggle">
-      <button id="viewTreeBtn" class="btn btn-secondary view-toggle-btn active" type="button">🌳 Pokok Keluarga</button>
-      <button id="viewMapBtn" class="btn btn-secondary view-toggle-btn" type="button">🗺️ Peta Keluarga</button>
-    </div>
-    <div class="topbar-actions">
-      <button id="themeToggleBtn" class="btn btn-secondary btn-icon" aria-label="Tukar tema gelap/terang" title="Tukar tema gelap/terang">🌙</button>
-      <button id="zoomFitBtn" class="btn btn-secondary">Set Semula Paparan</button>
-      <div id="authArea" class="auth-area">
-        <div id="googleSignInBtn" class="google-btn-frame hidden"></div>
-        <p id="googleNotConfiguredNote" class="muted-text auth-note hidden">Log masuk belum disediakan.</p>
-        <div id="userInfo" class="user-info hidden">
-          <img id="userAvatar" class="user-avatar hidden" alt="" />
-          <span id="userName" class="user-name"></span>
-          <button type="button" id="userLogoutBtn" class="btn btn-secondary btn-icon" title="Log keluar">⎋</button>
-        </div>
-      </div>
-      <button id="manageUsersBtn" class="btn btn-secondary hidden">Urus Pengguna</button>
-      <button id="addPersonBtn" class="btn btn-primary hidden">+ Tambah Orang</button>
+    <div class="appbar-actions">
+      <button type="button" id="searchBtn" class="icon-btn" data-i18n-label="common.search"></button>
+      <button type="button" id="langBtn" class="lang-btn" aria-label="Bahasa / Language"></button>
     </div>
   </header>
 
-  <main id="treeContainer">
-    <div id="treeBranchFilter" class="tree-branch-filter">
-      <label for="branchFilterSelect">Papar cabang:</label>
-      <select id="branchFilterSelect">
-        <option value="">Semua pokok keluarga</option>
-      </select>
-      <button type="button" id="branchFilterClearBtn" class="btn btn-secondary btn-icon hidden" title="Papar semua semula">✕ Semua</button>
-    </div>
-    <svg id="treeSvg"></svg>
-    <div id="emptyState" class="empty-state hidden">
-      <h2>Salasilah keluarga anda masih kosong</h2>
-      <p>Tambah orang pertama untuk bermula.</p>
-      <button id="addFirstPersonBtn" class="btn btn-primary">+ Tambah Orang</button>
-    </div>
+  <main id="views">
+    <section class="view" id="view-home" data-view="home"></section>
+    <section class="view view-fixed" id="view-tree" data-view="tree"></section>
+    <section class="view view-fixed" id="view-map" data-view="map"></section>
+    <section class="view" id="view-memories" data-view="memories"></section>
+    <section class="view" id="view-album" data-view="album"></section>
+    <section class="view" id="view-relation" data-view="relation"></section>
+    <section class="view" id="view-more" data-view="more"></section>
   </main>
 
-  <main id="mapContainer" class="hidden">
-    <div id="mapStateFilter" class="map-state-filter"></div>
-    <div id="familyMap"></div>
-  </main>
+  <nav class="tabbar" id="tabbar">
+    <a href="#/" data-tab="home"><span class="tab-ic" data-icon="home"></span><span data-i18n="tab.home"></span></a>
+    <a href="#/tree" data-tab="tree"><span class="tab-ic" data-icon="tree"></span><span data-i18n="tab.tree"></span></a>
+    <a href="#/map" data-tab="map"><span class="tab-ic" data-icon="map"></span><span data-i18n="tab.map"></span></a>
+    <a href="#/memories" data-tab="memories"><span class="tab-ic" data-icon="image"></span><span data-i18n="tab.memories"></span></a>
+    <a href="#/more" data-tab="more"><span class="tab-ic" data-icon="menu"></span><span data-i18n="tab.more"></span></a>
+  </nav>
 
-  <!-- Panel butiran orang -->
-  <aside id="detailPanel" class="panel hidden">
-    <button class="panel-close" id="detailCloseBtn">&times;</button>
-    <div id="detailContent"></div>
-  </aside>
-
-  <!-- Modal Tambah / Sunting orang -->
-  <div id="personModal" class="modal-overlay hidden">
-    <div class="modal">
-      <button class="panel-close" id="personModalCloseBtn">&times;</button>
-      <h2 id="personModalTitle">Tambah Orang</h2>
-      <form id="personForm">
-        <input type="hidden" id="personId" />
-        <div class="form-row">
-          <label>Nama *<input type="text" id="firstName" required /></label>
-          <label>Jantina
-            <select id="gender">
-              <option value="unknown">Tidak dinyatakan</option>
-              <option value="female">Perempuan</option>
-              <option value="male">Lelaki</option>
-            </select>
-          </label>
-        </div>
-        <div class="form-row">
-          <label>Bin/Binti
-            <select id="binBinti">
-              <option value="Bin">Bin</option>
-              <option value="Binti">Binti</option>
-            </select>
-          </label>
-          <label>Nama bapa (untuk bin/binti)<input type="text" id="fatherNameText" placeholder="cth. Abdullah" /></label>
-        </div>
-        <div id="fatherMatchHint" class="auto-match-hint hidden"></div>
-        <div class="form-row">
-          <label>Gambar
-            <input type="file" id="photoFile" accept="image/*" />
-            <img id="photoPreview" class="photo-preview hidden" alt="Pratonton gambar" />
-          </label>
-        </div>
-        <div class="form-row">
-          <label>Tarikh lahir<input type="text" id="birthDate" placeholder="cth. 1950 atau 1950-04-12" /></label>
-          <label>Tarikh meninggal dunia<input type="text" id="deathDate" placeholder="biarkan kosong jika masih hidup" /></label>
-        </div>
-        <div class="form-row">
-          <label>Bapa<select id="fatherId"><option value="">— Tiada —</option></select></label>
-          <label>Ibu<select id="motherId"><option value="">— Tiada —</option></select></label>
-        </div>
-        <div class="form-row">
-          <label>Nama panggilan<input type="text" id="nickname" placeholder="cth. Along" /></label>
-          <label>Negeri
-            <select id="stateSelect">
-              <option value="">— Tiada —</option>
-            </select>
-          </label>
-        </div>
-        <label class="full">
-          Alamat <span class="muted-text">(hanya kelihatan kepada ahli yang log masuk)</span>
-          <textarea id="address" rows="2" placeholder="cth. Ulu Tiram, Johor"></textarea>
-        </label>
-        <label class="full">
-          No. telefon <span class="muted-text">(hanya kelihatan kepada ahli yang log masuk)</span>
-          <input type="text" id="phone" placeholder="cth. 012-3456789" />
-        </label>
-        <label class="full">Biografi / catatan<textarea id="bio" rows="3"></textarea></label>
-
-        <div id="spouseSection" class="hidden">
-          <h3>Pasangan</h3>
-          <ul id="spouseList"></ul>
-          <div class="form-row">
-            <select id="addSpouseSelect"><option value="">— Pilih orang —</option></select>
-            <button type="button" id="addSpouseBtn" class="btn btn-secondary">Tambah pasangan</button>
-          </div>
-        </div>
-
-        <div class="modal-actions">
-          <button type="button" id="deletePersonBtn" class="btn btn-danger hidden">Padam orang</button>
-          <div class="spacer"></div>
-          <button type="button" id="cancelPersonBtn" class="btn btn-secondary">Batal</button>
-          <button type="submit" class="btn btn-primary">Simpan</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <!-- Sambung ke orang sedia ada (pasangan / anak) -->
-  <div id="linkPersonModal" class="modal-overlay hidden">
-    <div class="modal modal-small">
-      <h2 id="linkPersonTitle">Tambah Pasangan</h2>
-      <p id="linkPersonDesc" class="muted-text"></p>
-      <label class="full">Pilih orang sedia ada
-        <select id="linkPersonSelect"><option value="">— Pilih orang —</option></select>
-      </label>
-      <p id="linkPersonError" class="error-text hidden">Sila pilih seseorang.</p>
-      <div class="modal-actions">
-        <button type="button" id="linkPersonCreateNewBtn" class="btn btn-secondary">+ Orang baru</button>
-        <div class="spacer"></div>
-        <button type="button" id="linkPersonCancelBtn" class="btn btn-secondary">Batal</button>
-        <button type="button" id="linkPersonSubmitBtn" class="btn btn-primary">Sambungkan</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Urus pengguna (sekat/nyahsekat akaun Google) -->
-  <div id="userAdminModal" class="modal-overlay hidden">
-    <div class="modal modal-small">
-      <h2>Urus Pengguna</h2>
-      <p class="muted-text">Akaun yang disekat tidak boleh menambah, menyunting atau memadam ahli keluarga.</p>
-      <ul id="userAdminList" class="user-admin-list"></ul>
-      <div class="modal-actions">
-        <div class="spacer"></div>
-        <button type="button" id="userAdminCloseBtn" class="btn btn-secondary">Tutup</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Panduan permulaan untuk pengguna pertama kali -->
-  <div id="tourModal" class="modal-overlay hidden">
-    <div class="modal modal-small">
-      <div id="tourStepContent"></div>
-      <div class="modal-actions">
-        <button type="button" id="tourSkipBtn" class="btn btn-secondary">Langkau</button>
-        <div class="spacer"></div>
-        <button type="button" id="tourNextBtn" class="btn btn-primary">Seterusnya</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Laraskan/potong gambar -->
-  <div id="cropModal" class="modal-overlay hidden">
-    <div class="modal modal-small">
-      <h2>Laraskan Gambar</h2>
-      <div class="crop-container">
-        <img id="cropImage" alt="" />
-      </div>
-      <p class="crop-hint">Seret untuk gerakkan, gulung/cubit untuk zum.</p>
-      <div class="modal-actions">
-        <button type="button" id="cropCancelBtn" class="btn btn-secondary">Batal</button>
-        <button type="button" id="cropConfirmBtn" class="btn btn-primary">Gunakan Gambar</button>
-      </div>
-    </div>
-  </div>
+  <div id="overlayRoot"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <script src="https://unpkg.com/cropperjs@1/dist/cropper.min.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="app.js"></script>
+  <script src="js/names.js"></script>
+  <script src="js/family.js"></script>
+  <script src="js/i18n.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/person.js"></script>
+  <script src="js/tree.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/memories.js"></script>
+  <script src="js/pages.js"></script>
 </body>
 </html>
