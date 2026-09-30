@@ -59,7 +59,6 @@
       needsFit = true;
       paint();
     }));
-    FT.on('theme', () => { if (map) setTiles(); });
   }
 
   function field(p) { return mode === 'born' ? p.birthState : p.state; }
@@ -75,13 +74,13 @@
     return out;
   }
 
+  // Free OpenStreetMap background, no API key needed. Dark mode darkens it
+  // with a CSS filter (see .leaflet-tile-pane in style.css).
   function setTiles() {
-    if (tiles) tiles.remove();
-    const dark = document.documentElement.getAttribute('data-theme') === 'dark';
-    tiles = L.tileLayer(`https://{s}.basemaps.cartocdn.com/${dark ? 'dark' : 'light'}_all/{z}/{x}/{y}{r}.png`, {
-      attribution: '&copy; OpenStreetMap &copy; CARTO',
-      subdomains: 'abcd',
-      maxZoom: 18,
+    if (tiles) return;
+    tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap',
+      maxZoom: 19,
     }).addTo(map);
     tiles.bringToBack();
   }
