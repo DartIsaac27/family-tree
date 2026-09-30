@@ -341,20 +341,24 @@
   // ---- duplicate warning ----
 
   // Resolves { action: 'existing', person } | { action: 'new' } | null (cancel)
+  // An exact same name can't be saved; only an admin may confirm it's a
+  // different person (the server enforces this too).
   function duplicateDialog(matches, allowUseExisting) {
+    const blocked = matches.some((m) => m.reason === 'same') && !(FT.state.user && FT.state.user.isAdmin);
     return new Promise((resolve) => {
       let answer = null;
       const s = FT.sheet({
         title: t('dup.title'),
         covers: true,
         body: `<p>${esc(t('dup.body'))}</p>
+          ${blocked ? `<p class="dup-blocked">🚫 ${esc(t('dup.blocked'))}</p>` : ''}
           <div class="plist">${matches.map((m) => `
             <div class="dup-item">
               ${FT.personRow(m.person, `${t(`dup.${m.reason}`)}${FT.personHint(m.person) ? ' · ' + FT.personHint(m.person) : ''}`)}
               ${allowUseExisting ? `<button type="button" class="btn btn-primary btn-small" data-use="${m.person.id}">${esc(t('dup.useExisting'))}</button>` : ''}
             </div>`).join('')}</div>`,
         foot: `<button type="button" class="btn btn-ghost" data-cancel>${esc(t('common.cancel'))}</button>
-               <button type="button" class="btn btn-soft" data-new>${esc(t('dup.createAnyway'))}</button>`,
+               ${blocked ? '' : `<button type="button" class="btn btn-soft" data-new>${esc(t('dup.createAnyway'))}</button>`}`,
         onClose: () => resolve(answer),
         onMount(sh) {
           FT.bindPeople(sh.body);
@@ -363,7 +367,8 @@
             sh.close();
           }));
           sh.foot.querySelector('[data-cancel]').addEventListener('click', sh.close);
-          sh.foot.querySelector('[data-new]').addEventListener('click', () => { answer = { action: 'new' }; sh.close(); });
+          const createBtn = sh.foot.querySelector('[data-new]');
+          if (createBtn) createBtn.addEventListener('click', () => { answer = { action: 'new' }; sh.close(); });
         },
       });
       return s;
@@ -600,7 +605,8 @@
       const matches = currentMatches();
       if (!matches.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
       const strong = matches.some((m) => m.reason !== 'similar');
-      box.innerHTML = `<div class="dup-head">⚠️ ${esc(strong ? t('dup.inline') : t('dup.inlineSimilar'))}</div>
+      const exact = matches.some((m) => m.reason === 'same') && !(FT.state.user && FT.state.user.isAdmin);
+      box.innerHTML = `<div class="dup-head">⚠️ ${esc(exact ? t('dup.blocked') : strong ? t('dup.inline') : t('dup.inlineSimilar'))}</div>
         <div class="chips">${matches.slice(0, 3).map((m) => FT.personChip(m.person, FT.personHint(m.person))).join('')}</div>`;
       box.classList.toggle('dup-strong', strong);
       box.classList.remove('hidden');

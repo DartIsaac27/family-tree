@@ -36,8 +36,12 @@
       .map((w) => WORD_VARIANTS[w] || w);
   }
 
+  // Titles people sometimes add or leave out ("Hj Ahmad" = "Ahmad").
+  const TITLES = new Set(['haji', 'hj', 'hajjah', 'hajah', 'hjh', 'dato', 'datuk', 'datin', 'dr',
+    'allahyarham', 'allahyarhamah', 'arwah', 'almarhum', 'almarhumah', 'encik', 'puan', 'cik', 'tuan']);
+
   function nameKey(firstName, lastName) {
-    return tokens(`${firstName || ''} ${lastName || ''}`).join(' ');
+    return tokens(`${firstName || ''} ${lastName || ''}`).filter((w) => !TITLES.has(w)).join(' ');
   }
 
   // "Ali bin Abu Bakar" -> { firstName: 'Ali', lastName: 'bin Abu Bakar' }.
@@ -92,28 +96,36 @@
   }
 
   // Returns people who look like the same person as `candidate`, best match
-  // first. reason: 'same' (identical after normalising spelling) or
-  // 'similar' (very close spelling, e.g. a typo), or 'sibling' (same first
-  // name and same parent — siblings almost never share a first name).
+  // first. reason:
+  //  'same'    - the same name once spelling, titles and spaces are ignored
+  //              ("Hj Mohd Ali bin Abu" = "Muhammad Ali bin Abu",
+  //              "Nurulain" = "Nurul Ain"). Only an admin may save this.
+  //  'sibling' - same first name and same parent (siblings almost never
+  //              share a first name).
+  //  'similar' - very close spelling (a typo), or the same first name where
+  //              one of the two has no "bin/binti" part yet.
   function findDuplicates(candidate, people, excludeId) {
     const key = nameKey(candidate.firstName, candidate.lastName);
     const firstKey = nameKey(candidate.firstName, '');
     if (!firstKey) return [];
+    const compact = key.replace(/ /g, '');
+    const hasFather = !!fatherPart(candidate.lastName);
     const out = [];
     people.forEach((p) => {
       if (excludeId != null && p.id === excludeId) return;
       const pKey = nameKey(p.firstName, p.lastName);
       let score = 0;
       let reason = null;
-      if (pKey === key) { score = 1; reason = 'same'; }
+      if (pKey === key || pKey.replace(/ /g, '') === compact) { score = 1; reason = 'same'; }
       else {
+        const sameFirst = nameKey(p.firstName, '') === firstKey;
         const sameParent = (candidate.fatherId && candidate.fatherId === p.fatherId)
           || (candidate.motherId && candidate.motherId === p.motherId);
-        if (sameParent && nameKey(p.firstName, '') === firstKey) { score = 0.95; reason = 'sibling'; }
+        if (sameParent && sameFirst) { score = 0.95; reason = 'sibling'; }
+        else if (sameFirst && hasFather !== !!fatherPart(p.lastName)) { score = 0.9; reason = 'similar'; }
         else {
           const sim = similarity(pKey, key);
-          // Only compare full names when both have a father's-name part, or
-          // single first names would match too eagerly ("Ali" vs "Alia").
+          // Short names ("Ali" vs "Alia") are too alike to compare by spelling.
           if (sim >= 0.88 && key.length >= 6) { score = sim; reason = 'similar'; }
         }
       }

@@ -807,6 +807,7 @@ select.input {
 .dup-inline.dup-strong { border-color: var(--danger); background: var(--danger-soft); }
 .dup-head { font-size: 14px; font-weight: 700; }
 .dup-inline .pchip { background: var(--surface); }
+.dup-blocked { padding: 10px 12px; border-radius: 12px; background: var(--danger-soft); color: var(--danger); font-weight: 700; }
 .dup-item { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
 .dup-item .prow { border: 0; }
 
