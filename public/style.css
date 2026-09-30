@@ -1170,6 +1170,7 @@ select.input {
 .map-face .av { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); }
 .leaflet-container { font: inherit; background: var(--surface-2); }
 .leaflet-control-attribution { font-size: 10px; }
+[data-theme="dark"] .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9); }
 .state-shape { cursor: pointer; }
 
 /* ---- memories ---- */
